@@ -1,0 +1,2657 @@
+---
+- type: slc
+  content:
+  - "-- Functions to use neovim as a pager."
+  - "-- This code is a rewrite of two sources: vimcat and vimpager (which also"
+  - "-- conatins a version of vimcat)."
+  - "-- Vimcat back to Matthew J. Wozniski and can be found at"
+  - "-- https://github.com/godlygeek/vim-files/blob/master/macros/vimcat.sh"
+  - "-- Vimpager was written by Rafael Kitover and can be found at"
+  - "-- https://github.com/rkitover/vimpager"
+  - "-- Information about terminal escape codes:"
+  - "-- https://en.wikipedia.org/wiki/ANSI_escape_code"
+  - "-- Neovim defines this object but luacheck doesn't know it.  So we define a"
+  - "-- shortcut and tell luacheck to ignore it."
+  - "-- luacheck: ignore"
+  - "-- luacheck: ignore"
+  - "-- A mapping of ansi color numbers to neovim color names"
+  - "-- the names of neovim's highlighting attributes that are handled by this"
+  - "-- module"
+  - "-- Most attributes are refered to by their highlighting attribute name in"
+  - "-- neovim's :highlight command."
+  - --[2] = "faint", -- not handled by neovim
+  - --[5] = "slow blink", -- not handled by neovim
+  - --[6] = "underline", -- not handled by neovim
+  - -- TODO when to use the gui attribute "standout"?
+  - "-- These variables will be initialized during the first call to cat_mode() or"
+  - "-- pager_mode()."
+  - "--"
+  - "-- A cache to map syntax groups to ansi escape sequences in cat mode or"
+  - "-- remember defined syntax groups in the ansi rendering functions."
+  - "-- A local copy of the termguicolors option, used for color output in cat"
+  - "-- mode."
+  - "-- This variable holds the name of the detected parent process for pager mode."
+  - "-- A neovim highlight namespace to group together all highlights added to"
+  - "-- buffers by this module."
+  - "-- Split a 24 bit color number into the three red, green and blue values"
+  - "-- The lua implementation of these bit shift operations is taken from"
+  - "-- http://nova-fusion.com/2011/03/21/simulate-bitwise-shift-operators-in-lua"
+  - "-- Compute the escape sequences for a 24 bit color number."
+  - "-- Compute the escape sequences for a 8 bit color number."
+  - "-- Compute a ansi escape sequences to render a syntax group on the terminal."
+  - "-- Reset all attributes before setting new ones.  The vimscript version did"
+  - "-- use sevel explicit reset codes: 22, 24, 25, 27 and 28.  If no foreground"
+  - "-- or background color was defined for a syntax item they were reset with"
+  - "-- 39 or 49."
+  - "-- Initialize some module level variables for cat mode."
+  - -- Initialize the ansi group to color cache with the "Normal" hl group.
+  - "-- Get the value of &termguicolors from neovim."
+  - "-- Select the correct coloe escaping function."
+  - "-- Check if the begining of the current buffer contains ansi escape sequences."
+  - "-- Savely get the listchars option on different nvim versions"
+  - "--"
+  - "-- From release 0.4.3 to 0.4.4 the listchars option was changed from window"
+  - "-- local to global-local.  This affects the calls to either"
+  - "-- nvim_win_get_option or nvim_get_option so that there is no save way to call"
+  - "-- just one in all versions."
+  - "--"
+  - "-- returns: string -- the listchars value"
+  - "-- this works for newer versions of neovim"
+  - "-- this works for old neovim versions"
+  - "-- turn a listchars string into a table"
+  - "-- Iterate through the current buffer and print it to stdout with terminal"
+  - "-- color codes for highlighting."
+  - "-- Detect an empty buffer, see :help line2byte().  We can not use"
+  - "-- nvim_buf_get_lines as the table will contain one empty string for both an"
+  - "-- empty file and a file with just one empty line."
+  - "-- luacheck: ignore"
+  - "-- skip this char"
+  - -- Utf8 non breaking space is "\194\160", neovim represents all
+  - "-- files as utf8 internally, regardless of the actual encoding."
+  - "-- See :help 'encoding'."
+  - "-- append a eol listchar if &list is set"
+  - "-- Write the whole line and a newline char.  If this was the last line"
+  - "-- also reset the terminal attributes."
+  - "-- Call the highlight function to write the highlighted version of all buffers"
+  - "-- to stdout and quit nvim."
+  - "-- We can not use nvim_list_bufs() as a file might appear on the command"
+  - "-- line twice.  In this case we want to behave like cat(1) and display the"
+  - "-- file twice."
+  - "-- Replace a string prefix in all items in a list"
+  - "-- Escape all punctuation chars to protect from lua pattern chars."
+  - "-- Fix the runtimepath.  All user nvim folders are replaced by corresponding"
+  - "-- nvimpager folders."
+  - "-- Remove the custom nvimpager entry that was added on the command line."
+  - "-- Parse the command of the calling process to detect some common"
+  - "-- documentation programs (man, pydoc, perldoc, git, ...).  $PARENT was"
+  - "-- exported by the calling bash script and points to the calling program."
+  - "-- Search the begining of the current buffer to detect if it contains a man"
+  - "-- page."
+  - "-- Only check the first twelve lines (for speed)."
+  - -- Check if the line contains the string "NAME" or "NAME" with every
+  - "-- character overwritten by itself."
+  - "-- An earlier version of this code did also check if there are whitespace"
+  - "-- characters at the end of the line.  I could not find a man pager where"
+  - "-- this was the case."
+  - -- FIXME This only works for man pages in languages where "NAME" is used
+  - -- as the headline.  Some (not all!) German man pages use "BBEZEICHNUNG"
+  - "-- instead."
+  - "-- Remove ansi escape sequences from the current buffer."
+  - "-- Detect possible filetypes for the current buffer by looking at the pstree"
+  - "-- or ansi escape sequences or manpage sequences in the current buffer."
+  - "-- Use nvim's syntax highlighting for git buffers instead of git's"
+  - "-- internal highlighting."
+  - "-- only set the syntax, not the full :Man plugin"
+  - "-- Create an iterator that tokenizes the given input string into ansi escape"
+  - "-- sequences."
+  - "--"
+  - "-- Lua patterns for string.gmatch"
+  - "-- The empty input string is a special case where we return one single"
+  - "-- token."
+  - "-- we keep track of the position in the input with a local variable so that"
+  - -- our "next" function does not need to rely on the second argument.
+  - "-- Especially if a token appears twice in the input that might be of"
+  - "-- importance."
+  - "-- If the position we are currently tokenizing is beyond the input string"
+  - "-- return nil => stop tokenizing."
+  - "-- If we are on the last character and it is a semicolon, return an empty"
+  - "-- token and move position beyond the input to stop on the next call."
+  - "-- This is hard to handle properly in the tokenizer below."
+  - -- first check for the special sequences "38;" "48;"
+  - "-- Try to match an 8 bit or a 24 bit color sequence"
+  - "-- If no valid special sequence was found we fall through to the normal"
+  - "-- tokenization."
+  - "-- handle all other tokens, we expect a simple number followed by either a"
+  - "-- semicolon or the end of the string, or the end of the input string"
+  - "-- directly."
+  - "-- no further semicolon was found, we reached the end of the input"
+  - "-- string, the next call to this function will return nil"
+  - "-- We only skip the semicolon if it was not at the end of the input"
+  - "-- string."
+  - "-- The line and column where the currently described state starts"
+  - "-- First we check for 256 colors and 24 bit color sequences."
+  - "-- 2, 5 and 6 could be handled here if they were supported."
+  - -- 22 means "doubley underline" or "bold off", we could implement
+  - "-- doubley underline by undercurl."
+  - "--self.undercurl = true"
+  - "--self.faint = false"
+  - "-- 25 means blink off so it could also be handled here if it was"
+  - "-- supported."
+  - "-- foreground color"
+  - "-- reset foreground"
+  - "-- background color"
+  - "-- reset background"
+  - "-- bright foreground color"
+  - "-- bright background color"
+  - "-- high pallet colors"
+  - -- + 82 + 10 * (fgbg == "background" and 1 or 0)
+  - "-- color cube"
+  - "-- grayscale ramp"
+  - "-- Wrapper around nvim_buf_add_highlight to fix index offsets"
+  - "--"
+  - "-- The function nvim_buf_add_highlight expects 0 based line numbers and column"
+  - "-- numbers.  Set the start column to 0, the end column to -1 if not given."
+  - "-- check if the hl group already exists"
+  - "-- Parse the current buffer for ansi escape sequences and add buffer"
+  - "-- highlights to the buffer instead."
+  - "-- update the position to find the next match in the line"
+  - "-- Set up mappings to make nvim behave a little more like a pager."
+  - "-- Setup function for the VimEnter autocmd."
+  - "-- This function will be called for each buffer once"
+  - "-- Try to highlight ansi escape sequences."
+  - "-- Lines with concealed ansi esc sequences seem shorter than they are (by"
+  - "-- character count) so it looks like they wrap to early and the concealing"
+  - "-- of escape sequences only works for the first &synmaxcol chars."
+  - "-- unlimited"
+  - "-- Setup function to be called from --cmd."
+  - "-- Don't remember file names and positions"
+  - "-- prevent messages when opening files (especially for the cat version)"
+  - "-- Define autocmd group for nvimpager."
+  - "-- We disable modelines for this buffer as they could disturb the git"
+  - "-- highlighting in diffs."
+  - "-- Theoretically these options only affect the pager mode so they could also"
+  - "-- be set in stage2() but that would overwrite user settings from the init"
+  - "-- file."
+  - "-- Set up autocomands to start the correct mode after startup or for each"
+  - -- file.  This function assumes that in "cat mode" we are called with
+  - "-- --headless and hence do not have a user interface.  This also means that"
+  - "-- this function can only be called with -c or later as the user interface"
+  - "-- would not be available in --cmd."
+  - -- The "nested" in these autocomands enables nested executions of
+  - "-- autocomands inside the *_mode() functions.  See :h autocmd-nested, for"
+  - -- compatibility with nvim < 0.4 we use "nested" and not "++nested".
+  - "-- user facing options"
+  - "-- if the default mappings should be defined"
+  - "-- exported functions"
+  - "-- functions only exported for tests"
+  color: "#838183"
+- type: kwa
+  content:
+  - local
+  - local
+  - local
+  - local
+  - local
+  - local
+  - local
+  - local
+  - local
+  - local function
+  - local
+  - local
+  - local
+  - return
+  - end
+  - local function
+  - return
+  - end
+  - local function
+  - local
+  - local
+  - local
+  - local
+  - return
+  - end
+  - local function
+  - local
+  - local
+  - if
+  - then
+  - else
+  - end
+  - return
+  - end
+  - local function
+  - local
+  - if
+  - then
+  - if
+  - then
+  - else
+  - end
+  - elseif
+  - then
+  - if
+  - then
+  - else
+  - end
+  - elseif
+  - then
+  - else
+  - end
+  - return
+  - end
+  - local function
+  - if
+  - then
+  - return
+  - end
+  - local
+  - if
+  - then
+  - end
+  - local
+  - if
+  - then
+  - end
+  - if
+  - then
+  - end
+  - if
+  - then
+  - end
+  - if
+  - then
+  - 'true'
+  - end
+  - if
+  - then
+  - 'false'
+  - end
+  - return
+  - end
+  - local function
+  - if
+  - then
+  - else
+  - end
+  - end
+  - local function
+  - local
+  - if
+  - or
+  - then
+  - for
+  - in
+  - 'false'
+  - do
+  - if
+  - nil then return true end
+  - end
+  - end
+  - return false
+  - end
+  - local function
+  - local
+  - if
+  - then return
+  - end
+  - return
+  - end
+  - local function
+  - local
+  - for
+  - in
+  - 'true'
+  - do
+  - local
+  - 'true'
+  - end
+  - return
+  - end
+  - local function
+  - if
+  - and
+  - then
+  - return
+  - elseif
+  - then
+  - for
+  - in
+  - 'false'
+  - do
+  - end
+  - return
+  - end
+  - local
+  - local
+  - local
+  - local
+  - local
+  - local
+  - and
+  - or
+  - local
+  - local
+  - local
+  - for
+  - in
+  - 'false'
+  - do
+  - local
+  - local
+  - 'false'
+  - for
+  - do
+  - local
+  - local
+  - local
+  - local
+  - if
+  - then
+  - 'false'
+  - elseif
+  - and
+  - then
+  - else
+  - local
+  - if
+  - then
+  - if
+  - and
+  - then
+  - end
+  - else
+  - if
+  - and
+  - 'true'
+  - nil then
+  - if
+  - then
+  - if
+  - nil then
+  - or
+  - or
+  - else
+  - or
+  - end
+  - elseif
+  - and
+  - then
+  - or
+  - 'true'
+  - end
+  - else
+  - 'true'
+  - end
+  - end
+  - if
+  - then
+  - end
+  - end
+  - end
+  - if
+  - and
+  - nil then
+  - if
+  - then
+  - end
+  - end
+  - and
+  - or
+  - end
+  - end
+  - local function
+  - for
+  - do
+  - end
+  - end
+  - local function
+  - for
+  - in
+  - do
+  - end
+  - return
+  - end
+  - local function
+  - local
+  - nil
+  - local
+  - for
+  - in
+  - do
+  - local
+  - end
+  - end
+  - local function
+  - local
+  - if not
+  - then return nil end
+  - local
+  - if
+  - nil then return
+  - end
+  - local
+  - if
+  - then
+  - return
+  - elseif
+  - nil or
+  - nil then
+  - return
+  - elseif
+  - or
+  - or
+  - then
+  - return
+  - elseif
+  - or
+  - then
+  - return
+  - elseif
+  - then
+  - return
+  - end
+  - return nil
+  - end
+  - local function
+  - for
+  - in
+  - 'false'
+  - do
+  - if
+  - or
+  - or
+  - or
+  - then
+  - return true
+  - end
+  - end
+  - return false
+  - end
+  - local function
+  - local
+  - 'true'
+  - end
+  - local function
+  - if not
+  - and
+  - then
+  - end
+  - if
+  - then
+  - end
+  - if
+  - then
+  - 'false'
+  - 'true'
+  - elseif
+  - or
+  - or
+  - then
+  - end
+  - if
+  - nil then
+  - end
+  - end
+  - local function
+  - if
+  - then return
+  - end
+  - local
+  - local function
+  - if
+  - then return nil end
+  - if
+  - and
+  - then
+  - return
+  - end
+  - local
+  - if
+  - or
+  - then
+  - local
+  - for
+  - in
+  - do
+  - local
+  - if
+  - then
+  - return
+  - and
+  - or
+  - end
+  - end
+  - end
+  - local
+  - local
+  - if
+  - nil then
+  - return
+  - else
+  - if
+  - then
+  - end
+  - return
+  - end
+  - end
+  - return
+  - nil
+  - end
+  - local
+  - function
+  - for
+  - in
+  - do
+  - false end
+  - end
+  - function
+  - if
+  - then return
+  - end
+  - local
+  - for
+  - in
+  - do
+  - if
+  - then
+  - end
+  - end
+  - return
+  - end
+  - function
+  - for
+  - in
+  - do
+  - if
+  - nil then
+  - elseif
+  - nil then
+  - else
+  - if
+  - then
+  - else
+  - end
+  - if
+  - then
+  - elseif
+  - or
+  - or
+  - or
+  - or
+  - or
+  - then
+  - 'true'
+  - elseif
+  - then
+  - elseif
+  - then
+  - 'false'
+  - elseif
+  - or
+  - or
+  - or
+  - or
+  - then
+  - 'false'
+  - elseif
+  - and
+  - then
+  - elseif
+  - then
+  - elseif
+  - and
+  - then
+  - elseif
+  - then
+  - elseif
+  - and
+  - then
+  - elseif
+  - and
+  - then
+  - end
+  - end
+  - end
+  - end
+  - function
+  - local
+  - if
+  - and
+  - then
+  - elseif
+  - and
+  - then
+  - elseif
+  - and
+  - then
+  - else
+  - end
+  - end
+  - function
+  - local
+  - if
+  - then
+  - if
+  - then
+  - end
+  - end
+  - if
+  - then
+  - if
+  - then
+  - end
+  - end
+  - local
+  - for
+  - in
+  - do
+  - if
+  - then
+  - end
+  - end
+  - if
+  - then
+  - end
+  - if
+  - then
+  - return
+  - else
+  - return
+  - end
+  - end
+  - local function
+  - local
+  - local
+  - or
+  - local
+  - or
+  - end
+  - function
+  - if
+  - and
+  - then
+  - return
+  - end
+  - local
+  - if
+  - nil then
+  - 'true'
+  - end
+  - if
+  - then
+  - else
+  - for
+  - do
+  - end
+  - end
+  - end
+  - local function
+  - local
+  - for
+  - in
+  - 'false'
+  - do
+  - local
+  - nil
+  - nil
+  - nil
+  - local
+  - repeat
+  - if
+  - nil then
+  - end
+  - until
+  - nil
+  - end
+  - end
+  - local function
+  - local function
+  - 'true'
+  - end
+  - end
+  - local function
+  - if
+  - then
+  - 'false'
+  - end
+  - 'false'
+  - 'false'
+  - end
+  - local function
+  - if
+  - then
+  - 'false'
+  - end
+  - end
+  - local function
+  - local
+  - if
+  - then
+  - else
+  - if
+  - then
+  - end
+  - end
+  - end
+  - local
+  - 'true'
+  - return
+  color: "#000000"
+- type: opt
+  content:
+  - "="
+  - "."
+  - "="
+  - "= {"
+  - "["
+  - "] ="
+  - ",     ["
+  - "] ="
+  - ","
+  - "["
+  - "] ="
+  - ",       ["
+  - "] ="
+  - ","
+  - "["
+  - "] ="
+  - ",     ["
+  - "] ="
+  - ","
+  - "["
+  - "] ="
+  - ",    ["
+  - "] ="
+  - ","
+  - "["
+  - "] ="
+  - ",      ["
+  - "] ="
+  - ","
+  - "["
+  - "] ="
+  - ",   ["
+  - "] ="
+  - ","
+  - "["
+  - "] ="
+  - ",      ["
+  - "] ="
+  - ","
+  - "["
+  - "] ="
+  - ", ["
+  - "] ="
+  - ","
+  - "}"
+  - "= {"
+  - "["
+  - "] ="
+  - ","
+  - "["
+  - "] ="
+  - ","
+  - "["
+  - "] ="
+  - ","
+  - "["
+  - "] ="
+  - ","
+  - "["
+  - "] ="
+  - ","
+  - "["
+  - "] ="
+  - ","
+  - "}"
+  - "= {}"
+  - "("
+  - ")"
+  - "="
+  - "."
+  - "("
+  - "/"
+  - ")"
+  - "="
+  - "."
+  - "("
+  - "."
+  - "("
+  - "/"
+  - ") %"
+  - ")"
+  - "="
+  - "."
+  - "("
+  - "%"
+  - ")"
+  - ","
+  - ","
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ","
+  - "*"
+  - "+"
+  - "*"
+  - "+"
+  - ")"
+  - "("
+  - ")"
+  - "="
+  - "."
+  - "("
+  - "/"
+  - ")"
+  - "="
+  - "."
+  - "("
+  - "."
+  - "("
+  - "/"
+  - ") %"
+  - ")"
+  - "="
+  - "."
+  - "("
+  - "%"
+  - ")"
+  - "= {["
+  - "]="
+  - ", ["
+  - "]="
+  - ", ["
+  - "]="
+  - ", ["
+  - "]="
+  - ", ["
+  - "]="
+  - ", ["
+  - "]="
+  - "}"
+  - "["
+  - "],"
+  - "["
+  - "],"
+  - "["
+  - "]"
+  - "("
+  - ","
+  - ")"
+  - ","
+  - ","
+  - "="
+  - "("
+  - ")"
+  - "="
+  - "="
+  - ".."
+  - ".."
+  - ".."
+  - ".."
+  - ".."
+  - "("
+  - ","
+  - ")"
+  - "<"
+  - "="
+  - "="
+  - "<"
+  - "="
+  - "-"
+  - "="
+  - "="
+  - "="
+  - "="
+  - ".."
+  - "("
+  - ")"
+  - "["
+  - "]"
+  - "["
+  - "]"
+  - "="
+  - "."
+  - "("
+  - ","
+  - ")"
+  - "."
+  - "."
+  - ","
+  - "."
+  - "="
+  - "."
+  - ","
+  - "."
+  - "="
+  - "."
+  - "="
+  - ".."
+  - "."
+  - "="
+  - ".."
+  - "."
+  - "="
+  - ".."
+  - "."
+  - "="
+  - ".."
+  - ".."
+  - "("
+  - "."
+  - ","
+  - ")"
+  - "."
+  - "="
+  - ".."
+  - ".."
+  - "("
+  - "."
+  - ","
+  - ")"
+  - "="
+  - ".."
+  - "["
+  - "] ="
+  - "()"
+  - "["
+  - "] ="
+  - "("
+  - "."
+  - "("
+  - ", {"
+  - "}))"
+  - "="
+  - "."
+  - "("
+  - ")"
+  - "="
+  - "="
+  - "()"
+  - "="
+  - "."
+  - "("
+  - ","
+  - ")"
+  - "=="
+  - "=="
+  - ","
+  - "("
+  - "."
+  - "("
+  - ","
+  - ","
+  - ","
+  - "))"
+  - ":"
+  - "("
+  - ") ~="
+  - "()"
+  - ","
+  - "="
+  - "("
+  - "."
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ","
+  - ")"
+  - "("
+  - ")"
+  - "= {}"
+  - "."
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "="
+  - "."
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "["
+  - "["
+  - "="
+  - "["
+  - "]"
+  - "()"
+  - "."
+  - "("
+  - ") =="
+  - "."
+  - "("
+  - ", {"
+  - "}) == -"
+  - "()"
+  - ","
+  - "("
+  - "."
+  - "("
+  - ","
+  - ", -"
+  - ","
+  - "))"
+  - "."
+  - "("
+  - ","
+  - ")"
+  - "="
+  - "."
+  - "("
+  - ","
+  - ")"
+  - "="
+  - "."
+  - "("
+  - ", {"
+  - "})"
+  - "="
+  - "."
+  - "("
+  - ", {"
+  - "})"
+  - "="
+  - "."
+  - "("
+  - ", {"
+  - "})"
+  - "="
+  - "."
+  - "("
+  - ","
+  - ")"
+  - "="
+  - "("
+  - "())"
+  - "{}"
+  - "= -"
+  - "= -"
+  - "="
+  - "."
+  - "("
+  - ")"
+  - ","
+  - "("
+  - "."
+  - "("
+  - ","
+  - ", -"
+  - ","
+  - "))"
+  - "="
+  - "="
+  - "="
+  - ","
+  - ":"
+  - "()"
+  - "="
+  - "."
+  - "("
+  - ","
+  - "{"
+  - ","
+  - "})"
+  - "="
+  - "["
+  - "] =="
+  - "="
+  - "["
+  - "]"
+  - "="
+  - "["
+  - "]"
+  - "="
+  - "=="
+  - ","
+  - "="
+  - "=="
+  - "=="
+  - "="
+  - "="
+  - "="
+  - "="
+  - ":"
+  - "("
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ","
+  - ","
+  - ","
+  - ") ~="
+  - "="
+  - "=="
+  - ":"
+  - "("
+  - ","
+  - ") ~="
+  - "="
+  - "."
+  - "."
+  - "="
+  - "."
+  - "=="
+  - ":"
+  - "("
+  - "+"
+  - ","
+  - "+"
+  - ") =="
+  - "="
+  - "."
+  - "="
+  - "="
+  - "."
+  - "("
+  - ", {"
+  - ","
+  - ","
+  - "})"
+  - "~="
+  - "="
+  - ".."
+  - "("
+  - ")"
+  - "="
+  - "="
+  - ".."
+  - "."
+  - "~="
+  - "="
+  - "~="
+  - "="
+  - ".."
+  - "("
+  - ")"
+  - "="
+  - "="
+  - ".."
+  - "."
+  - "."
+  - "("
+  - ","
+  - "=="
+  - "["
+  - "]"
+  - ","
+  - ")"
+  - "()"
+  - "()"
+  - "()"
+  - "="
+  - ","
+  - "."
+  - "("
+  - ", {})"
+  - "."
+  - "("
+  - ")"
+  - "()"
+  - "."
+  - "("
+  - ")"
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "="
+  - ":"
+  - "("
+  - ","
+  - ")"
+  - ","
+  - "("
+  - ")"
+  - "["
+  - "] ="
+  - ":"
+  - "("
+  - ".."
+  - ","
+  - ","
+  - ")"
+  - "()"
+  - "="
+  - "."
+  - "()"
+  - "[#"
+  - "] ="
+  - ","
+  - "({"
+  - ","
+  - "})"
+  - "="
+  - "."
+  - "("
+  - ", {"
+  - "})"
+  - "="
+  - ".."
+  - "="
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "="
+  - "."
+  - "("
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ","
+  - ")"
+  - "="
+  - "."
+  - "("
+  - ") .."
+  - ".."
+  - "."
+  - "("
+  - ","
+  - ")"
+  - "="
+  - ".."
+  - "."
+  - "("
+  - ".."
+  - ".."
+  - ")"
+  - "()"
+  - "="
+  - "."
+  - "("
+  - ")"
+  - "="
+  - "."
+  - "("
+  - "("
+  - "))"
+  - "=="
+  - "="
+  - "."
+  - "=="
+  - ":"
+  - "("
+  - ") ~="
+  - ":"
+  - "("
+  - ") ~="
+  - "=="
+  - "=="
+  - "=="
+  - "=="
+  - "=="
+  - "=="
+  - "()"
+  - ","
+  - "("
+  - "."
+  - "("
+  - ","
+  - ","
+  - ","
+  - "))"
+  - "=="
+  - "=="
+  - "=="
+  - "=="
+  - "()"
+  - "="
+  - "."
+  - "("
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ")"
+  - "."
+  - "("
+  - ", {"
+  - ","
+  - "})"
+  - "."
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "()"
+  - "()"
+  - "="
+  - "=="
+  - "()"
+  - "=="
+  - "."
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ")"
+  - "."
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "=="
+  - "=="
+  - "=="
+  - "="
+  - "~="
+  - "."
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "("
+  - ")"
+  - "=="
+  - "."
+  - "("
+  - ","
+  - ")"
+  - "="
+  - "("
+  - ")"
+  - ":"
+  - "() <"
+  - ":"
+  - "() =="
+  - ":"
+  - "(-"
+  - ") =="
+  - "="
+  - "+"
+  - "="
+  - ":"
+  - "("
+  - ","
+  - "+"
+  - ")"
+  - "=="
+  - "=="
+  - "= {"
+  - ","
+  - "}"
+  - ","
+  - "("
+  - ")"
+  - ","
+  - ","
+  - ","
+  - ","
+  - ","
+  - "="
+  - ":"
+  - "("
+  - ","
+  - ")"
+  - "=="
+  - "="
+  - "+"
+  - "=="
+  - ","
+  - ","
+  - ","
+  - "="
+  - "="
+  - ":"
+  - "("
+  - ","
+  - ")"
+  - "=="
+  - "="
+  - ":"
+  - "() +"
+  - ":"
+  - "("
+  - ", -"
+  - ")"
+  - "="
+  - "<"
+  - ":"
+  - "()"
+  - "="
+  - "+"
+  - ":"
+  - "("
+  - ","
+  - "-"
+  - ")"
+  - ","
+  - ","
+  - "= {"
+  - "="
+  - ","
+  - "="
+  - ","
+  - "}"
+  - "."
+  - "("
+  - ")"
+  - "."
+  - "="
+  - "."
+  - "="
+  - "."
+  - "="
+  - "."
+  - "="
+  - ","
+  - "("
+  - ")"
+  - "["
+  - "] ="
+  - "."
+  - "("
+  - ")"
+  - "."
+  - "="
+  - ".."
+  - "."
+  - ":"
+  - "("
+  - ","
+  - ") .."
+  - ".."
+  - "."
+  - ":"
+  - "("
+  - ","
+  - ")"
+  - ","
+  - "("
+  - ")"
+  - "["
+  - "]"
+  - "="
+  - ".."
+  - ".."
+  - "."
+  - "("
+  - ","
+  - ")"
+  - ","
+  - ","
+  - ","
+  - "("
+  - ")"
+  - "~="
+  - "["
+  - "] ="
+  - "("
+  - "("
+  - "),"
+  - "("
+  - "),"
+  - "("
+  - "))"
+  - "~="
+  - ":"
+  - "("
+  - ","
+  - ")"
+  - "["
+  - ".."
+  - ":"
+  - "("
+  - ","
+  - ").."
+  - "] ="
+  - "("
+  - ")"
+  - "=="
+  - "="
+  - "="
+  - "("
+  - ")"
+  - "=="
+  - ":"
+  - "()"
+  - "=="
+  - "=="
+  - "=="
+  - "=="
+  - "=="
+  - "=="
+  - "["
+  - "["
+  - "="
+  - "=="
+  - "=="
+  - "."
+  - "="
+  - "=="
+  - "=="
+  - "=="
+  - "=="
+  - "=="
+  - "["
+  - "["
+  - "-"
+  - "="
+  - ">="
+  - "<="
+  - "."
+  - "="
+  - "["
+  - "-"
+  - "]"
+  - "."
+  - "="
+  - "-"
+  - "=="
+  - "."
+  - "="
+  - "."
+  - "="
+  - ">="
+  - "<="
+  - "."
+  - "="
+  - "["
+  - "-"
+  - "]"
+  - "."
+  - "="
+  - "-"
+  - "=="
+  - "."
+  - "="
+  - "."
+  - "="
+  - ">="
+  - "<="
+  - "."
+  - "="
+  - "["
+  - "-"
+  - "]"
+  - ">="
+  - "<="
+  - "."
+  - "="
+  - "["
+  - "-"
+  - "]"
+  - "."
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "="
+  - "("
+  - ")"
+  - ">="
+  - "<="
+  - "="
+  - "["
+  - "]"
+  - ">="
+  - "<="
+  - "="
+  - "["
+  - "]"
+  - ">="
+  - "<="
+  - "="
+  - "("
+  - "("
+  - "-"
+  - "))"
+  - "="
+  - "+"
+  - "* ("
+  - "-"
+  - ")"
+  - "="
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "["
+  - "] ="
+  - ".."
+  - "."
+  - "("
+  - ","
+  - ")"
+  - "="
+  - "."
+  - "~="
+  - "="
+  - ".."
+  - ".."
+  - "."
+  - "."
+  - "~="
+  - "="
+  - ".."
+  - ".."
+  - "."
+  - "."
+  - "~="
+  - "="
+  - ".."
+  - ".."
+  - "."
+  - "."
+  - "~="
+  - "="
+  - ".."
+  - ".."
+  - "."
+  - "="
+  - ","
+  - "("
+  - ")"
+  - "["
+  - "]"
+  - "="
+  - ".."
+  - ".."
+  - "="
+  - ":"
+  - "("
+  - ")"
+  - "~="
+  - "="
+  - ".."
+  - ".."
+  - ".."
+  - ".."
+  - "=="
+  - ".."
+  - ".."
+  - ".."
+  - ".."
+  - "("
+  - ","
+  - ","
+  - ","
+  - ")"
+  - "="
+  - "-"
+  - "= ("
+  - ") -"
+  - "= ("
+  - ") -"
+  - "."
+  - "("
+  - ","
+  - ","
+  - ","
+  - ","
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ","
+  - ","
+  - ","
+  - ","
+  - ")"
+  - "=="
+  - "=="
+  - "="
+  - ":"
+  - "()"
+  - "["
+  - "] =="
+  - "."
+  - "("
+  - ":"
+  - "("
+  - "))"
+  - "["
+  - "] ="
+  - "=="
+  - "("
+  - ","
+  - ","
+  - ","
+  - ")"
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "="
+  - "+"
+  - ","
+  - "-"
+  - "("
+  - ","
+  - ")"
+  - "("
+  - ","
+  - ","
+  - ","
+  - ")"
+  - "()"
+  - "."
+  - "("
+  - ")"
+  - "."
+  - "("
+  - ".."
+  - ")"
+  - "."
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "="
+  - ":"
+  - "()"
+  - "="
+  - "."
+  - "("
+  - ")"
+  - ","
+  - "("
+  - "."
+  - "("
+  - ","
+  - ", -"
+  - ","
+  - "))"
+  - ","
+  - ","
+  - "="
+  - ","
+  - ","
+  - "="
+  - ","
+  - ","
+  - "="
+  - ":"
+  - "("
+  - ","
+  - ")"
+  - "~="
+  - ":"
+  - "("
+  - "."
+  - ","
+  - "."
+  - ","
+  - ","
+  - ")"
+  - "."
+  - "="
+  - "."
+  - "="
+  - ":"
+  - "("
+  - ")"
+  - "="
+  - "=="
+  - "()"
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ","
+  - ","
+  - ", {"
+  - "="
+  - "})"
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "()"
+  - "()"
+  - "()"
+  - "."
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "()"
+  - "()"
+  - "."
+  - "("
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ","
+  - "."
+  - "("
+  - ").."
+  - ")"
+  - "."
+  - "("
+  - ")"
+  - "."
+  - "("
+  - ")"
+  - "."
+  - "("
+  - ")"
+  - "="
+  - "()"
+  - "=="
+  - "."
+  - "("
+  - ","
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ","
+  - ")"
+  - "."
+  - "("
+  - ","
+  - ")"
+  - "()"
+  - "()"
+  - ","
+  - "#"
+  - "."
+  - "() =="
+  - ","
+  - "="
+  - ","
+  - "."
+  - "()"
+  - ","
+  - "="
+  - ","
+  - "."
+  - "("
+  - ".."
+  - ".."
+  - ".."
+  - ".."
+  - ")"
+  - "= {"
+  - "="
+  - ","
+  - "="
+  - ","
+  - "="
+  - ","
+  - "="
+  - ","
+  - "="
+  - ","
+  - "= {"
+  - "="
+  - ","
+  - "="
+  - ","
+  - "="
+  - ","
+  - "="
+  - ","
+  - "="
+  - ","
+  - "="
+  - ","
+  - "="
+  - ","
+  - "="
+  - ","
+  - "="
+  - ","
+  - "="
+  - ","
+  - "="
+  - ","
+  - "}"
+  - "}"
+  color: "#000000"
+- type: num
+  content:
+  - '0'
+  - '8'
+  - '1'
+  - '9'
+  - '2'
+  - '10'
+  - '3'
+  - '11'
+  - '4'
+  - '12'
+  - '5'
+  - '13'
+  - '6'
+  - '14'
+  - '7'
+  - '15'
+  - '1'
+  - '3'
+  - '4'
+  - '7'
+  - '8'
+  - '9'
+  - '2'
+  - '16'
+  - '2'
+  - '8'
+  - '2'
+  - '8'
+  - '2'
+  - '8'
+  - '2'
+  - '16'
+  - '2'
+  - '8'
+  - '36'
+  - '6'
+  - '6'
+  - '6'
+  - '0'
+  - '0'
+  - '1'
+  - '95'
+  - '2'
+  - '135'
+  - '3'
+  - '175'
+  - '4'
+  - '215'
+  - '5'
+  - '255'
+  - '8'
+  - '16'
+  - '8'
+  - '0'
+  - '0'
+  - '0'
+  - '0'
+  - '100'
+  - '0'
+  - '1'
+  - '2'
+  - '0'
+  - '1'
+  - '2'
+  - '1'
+  - '0'
+  - '0'
+  - '1'
+  - '0'
+  - '0'
+  - '1'
+  - '1'
+  - '0'
+  - '0'
+  - '0'
+  - '1'
+  - '1'
+  - '1'
+  - '1'
+  - '2'
+  - '3'
+  - '1'
+  - '1'
+  - '1'
+  - '1'
+  - '0'
+  - '2'
+  - '1'
+  - '0'
+  - '0'
+  - '12'
+  - '0'
+  - '0'
+  - '0'
+  - '1'
+  - '0'
+  - '0'
+  - '0'
+  - '0'
+  - '0'
+  - '1'
+  - '1'
+  - '1'
+  - '2'
+  - '1'
+  - '1'
+  - '1'
+  - '1'
+  - '1'
+  - '1'
+  - '1'
+  - '1'
+  - '1'
+  - '0'
+  - '0'
+  - '1'
+  - '3'
+  - '4'
+  - '7'
+  - '8'
+  - '9'
+  - '21'
+  - '22'
+  - '23'
+  - '24'
+  - '27'
+  - '28'
+  - '29'
+  - '20'
+  - '30'
+  - '37'
+  - '30'
+  - '30'
+  - '39'
+  - '40'
+  - '47'
+  - '40'
+  - '40'
+  - '49'
+  - '90'
+  - '97'
+  - '82'
+  - '100'
+  - '107'
+  - '92'
+  - '0'
+  - '7'
+  - '8'
+  - '15'
+  - '16'
+  - '231'
+  - '16'
+  - '8'
+  - '10'
+  - '232'
+  - '2'
+  - '1'
+  - '1'
+  - '1'
+  - '0'
+  - '1'
+  - '0'
+  - '1'
+  - '1'
+  - '1'
+  - '0'
+  - '3'
+  - '0'
+  - '0'
+  - '0'
+  - '1'
+  - '1'
+  - '0'
+  - '0'
+  - '0'
+  - '0'
+  - '0'
+  - '0'
+  - '0'
+  - '0'
+  - '0'
+  color: "#b07e00"
+- type: str
+  content:
+  - '"black"'
+  - '"darkgray"'
+  - '"red"'
+  - '"lightred"'
+  - '"green"'
+  - '"lightgreen"'
+  - '"yellow"'
+  - '"lightyellow"'
+  - '"blue"'
+  - '"lightblue"'
+  - '"magenta"'
+  - '"lightmagenta"'
+  - '"cyan"'
+  - '"lightcyan"'
+  - '"lightgray"'
+  - '"white"'
+  - '"bold"'
+  - '"italic"'
+  - '"underline"'
+  - '"reverse"'
+  - '"conceal"'
+  - '"strikethrough"'
+  - '"#%06x"'
+  - "'38;2;'"
+  - "'48;2;'"
+  - "';'"
+  - "';'"
+  - "'3'"
+  - "'4'"
+  - "'9'"
+  - "'10'"
+  - "'38;5;'"
+  - "'48;5;'"
+  - "'\\27[0'"
+  - "';1'"
+  - "';3'"
+  - "';4'"
+  - "';'"
+  - "';'"
+  - "'m'"
+  - "'hlID'"
+  - "'Normal'"
+  - "'termguicolors'"
+  - "'filetype'"
+  - "''"
+  - "'text'"
+  - "'\\27%[[;?]*[0-9.;]*[A-Za-z]'"
+  - "'listchars'"
+  - "'listchars'"
+  - '","'
+  - '":"'
+  - '"line2byte"'
+  - "'"
+  - "'"
+  - "'conceallevel'"
+  - "'hlID'"
+  - "'Conceal'"
+  - "'hlID'"
+  - "'Whitespace'"
+  - "'hlID'"
+  - "'NonText'"
+  - '"list"'
+  - "''"
+  - "'synconcealed'"
+  - "''"
+  - "' '"
+  - "\""
+  - "\""
+  - '" "'
+  - '"^ +$"'
+  - "\""
+  - "\""
+  - "\""
+  - "\""
+  - "\""
+  - "\""
+  - "'synID'"
+  - "''"
+  - "'"
+  - "'"
+  - "'argc'"
+  - "'next'"
+  - "'quitall!'"
+  - "'[^%w]'"
+  - "'%%%0'"
+  - "'^'"
+  - '"config"'
+  - '"data"'
+  - '"stdpath"'
+  - '"pager"'
+  - '","'
+  - '"packpath"'
+  - '"RUNTIME"'
+  - '","'
+  - '"runtimepath"'
+  - "'/rplugin.vim'"
+  - '"let $NVIM_RPLUGIN_MANIFEST = ''"'
+  - '"''"'
+  - "'PARENT'"
+  - "'none'"
+  - "'man'"
+  - "'man'"
+  - "'^[Pp]ython[0-9.]*'"
+  - "'^[Pp]ydoc[0-9.]*'"
+  - "'pydoc'"
+  - "'ruby'"
+  - "'irb'"
+  - "'ri'"
+  - "'ri'"
+  - "'perl'"
+  - "'perldoc'"
+  - "'perldoc'"
+  - "'git'"
+  - "'git'"
+  - "'NAME'"
+  - "'N"
+  - NA
+  - AM
+  - ME
+  - E'
+  - '"Name"'
+  - "'N"
+  - Na
+  - am
+  - me
+  - e'
+  - '"modifiable"'
+  - '"modifiable"'
+  - "[=[keepjumps silent %substitute/\\v\\e\\[[;?]*[0-9.;]*[a-z]//egi]=]"
+  - '"modifiable"'
+  - "'man'"
+  - "'git'"
+  - "'man'"
+  - "'readonly'"
+  - '"Man!"'
+  - "'readonly'"
+  - "'pydoc'"
+  - "'perldoc'"
+  - "'ri'"
+  - "'man'"
+  - "'filetype'"
+  - '""'
+  - '""'
+  - '""'
+  - '";"'
+  - '""'
+  - '"38;"'
+  - '"48;"'
+  - '"([34])8;5;(%d+);?"'
+  - '"([34])8;2;(%d+);(%d+);(%d+);?"'
+  - '"3"'
+  - '"foreground"'
+  - '"background"'
+  - '";"'
+  - '""'
+  - '""'
+  - '""'
+  - '""'
+  - '"NvimPagerConceal"'
+  - '"NvimPagerFG_"'
+  - '"#"'
+  - '""'
+  - '"_BG_"'
+  - '"#"'
+  - '""'
+  - '"_"'
+  - '"cterm"'
+  - '"g"'
+  - '""'
+  - '""'
+  - '""'
+  - '""'
+  - '""'
+  - '""'
+  - '""'
+  - '""'
+  - '" guifg="'
+  - '""'
+  - '" ctermfg="'
+  - '""'
+  - '" guibg="'
+  - '""'
+  - '" ctermbg="'
+  - '""'
+  - '","'
+  - '""'
+  - '" gui="'
+  - '" cterm="'
+  - '""'
+  - '"highlight default link "'
+  - '" Normal"'
+  - '"highlight default "'
+  - "\"syntax match NvimPagerEscapeSequence conceal '"
+  - e
+  - '[[0-9;]*m''"'
+  - '"highlight NvimPagerConceal gui=NONE guisp=NONE "'
+  - '"guifg=background guibg=background"'
+  - '"conceallevel"'
+  - '"concealcursor"'
+  - '"nv"'
+  - '"\27%[([0-9;]*)m"'
+  - '""'
+  - "'n'"
+  - "'q'"
+  - "':quitall!<CR>'"
+  - "'v'"
+  - "'q'"
+  - "':<C-U>quitall!<CR>'"
+  - "'n'"
+  - "'<Space>'"
+  - "'<PageDown>'"
+  - "'n'"
+  - "'<S-Space>'"
+  - "'<PageUp>'"
+  - "'n'"
+  - "'g'"
+  - "'gg'"
+  - "'n'"
+  - "'<Up>'"
+  - "'<C-Y>'"
+  - "'n'"
+  - "'<Down>'"
+  - "'<C-E>'"
+  - "'n'"
+  - "'k'"
+  - "'<C-Y>'"
+  - "'n'"
+  - "'j'"
+  - "'<C-E>'"
+  - '"synmaxcol"'
+  - '"wrap"'
+  - "'modifiable'"
+  - "'modified'"
+  - "'shada'"
+  - "''"
+  - "'shortmess'"
+  - "'shortmess'"
+  - "'F'"
+  - "'augroup NvimPager'"
+  - "'  autocmd!'"
+  - "'augroup END'"
+  - "'git'"
+  - "'modeline'"
+  - "'modelines'"
+  - "'mouse'"
+  - "'a'"
+  - "'laststatus'"
+  - "'cat'"
+  - "'VimEnter'"
+  - "'pager'"
+  - "'VimEnter,BufWinEnter'"
+  - "'autocmd NvimPager '"
+  - "' * nested lua nvimpager.'"
+  - "'_mode()'"
+  color: "#bf0303"
+- type: kwd
+  content:
+  - split_rgb_number
+  - hexformat_rgb_numbers
+  - split_predifined_terminal_color
+  - color2escape_24bit
+  - split_rgb_number
+  - color2escape_8bit
+  - group2ansi
+  - nvim_get_hl_by_id
+  - color2escape
+  - color2escape
+  - init_cat_mode
+  - group2ansi
+  - nvim_call_function
+  - nvim_get_option
+  - check_escape_sequences
+  - nvim_buf_get_option
+  - ipairs
+  - nvim_buf_get_lines
+  - find
+  - get_listchars
+  - pcall
+  - nvim_win_get_option
+  - parse_listchars
+  - gsplit
+  - split
+  - highlight
+  - nvim_buf_line_count
+  - nvim_call_function
+  - check_escape_sequences
+  - ipairs
+  - nvim_buf_get_lines
+  - nvim_win_get_option
+  - nvim_call_function
+  - nvim_call_function
+  - nvim_call_function
+  - nvim_win_get_option
+  - parse_listchars
+  - get_listchars
+  - nvim_buf_line_count
+  - ipairs
+  - nvim_buf_get_lines
+  - len
+  - nvim_call_function
+  - sub
+  - find
+  - find
+  - sub
+  - nvim_call_function
+  - group2ansi
+  - group2ansi
+  - cat_mode
+  - init_cat_mode
+  - highlight
+  - nvim_call_function
+  - nvim_command
+  - highlight
+  - nvim_command
+  - replace_prefix
+  - ipairs
+  - fix_runtime_path
+  - nvim_list_runtime_paths
+  - ipairs
+  - nvim_call_function
+  - replace_prefix
+  - concat
+  - nvim_set_option
+  - nvim_set_option
+  - nvim_command
+  - detect_parent_process
+  - nvim_get_proc
+  - find
+  - find
+  - detect_man_page_in_current_buffer
+  - ipairs
+  - nvim_buf_get_lines
+  - strip_ansi_escape_sequences_from_current_buffer
+  - nvim_buf_get_option
+  - nvim_buf_set_option
+  - nvim_command
+  - nvim_win_set_cursor
+  - nvim_buf_set_option
+  - detect_filetype
+  - detect_man_page_in_current_buffer
+  - strip_ansi_escape_sequences_from_current_buffer
+  - nvim_buf_set_option
+  - nvim_command
+  - nvim_buf_set_option
+  - nvim_buf_set_option
+  - tokenize
+  - gmatch
+  - len
+  - len
+  - sub
+  - sub
+  - ipairs
+  - find
+  - find
+  - len
+  - sub
+  - len
+  - sub
+  - clear
+  - pairs
+  - state2highlight_group_name
+  - pairs
+  - parse
+  - tokenize
+  - hexformat_rgb_numbers
+  - parse8bit
+  - sub
+  - clear
+  - parse8bit
+  - hexformat_rgb_numbers
+  - split_predifined_terminal_color
+  - hexformat_rgb_numbers
+  - compute_highlight_command
+  - pairs
+  - sub
+  - add_highlight
+  - nvim_buf_add_highlight
+  - render
+  - state2highlight_group_name
+  - nvim_command
+  - compute_highlight_command
+  - add_highlight
+  - add_highlight
+  - add_highlight
+  - add_highlight
+  - ansi2highlight
+  - nvim_command
+  - nvim_command
+  - nvim_win_set_option
+  - nvim_win_set_option
+  - clear
+  - nvim_create_namespace
+  - ipairs
+  - nvim_buf_get_lines
+  - find
+  - render
+  - parse
+  - set_maps
+  - map
+  - nvim_set_keymap
+  - map
+  - map
+  - map
+  - map
+  - map
+  - map
+  - map
+  - map
+  - map
+  - pager_mode
+  - check_escape_sequences
+  - ansi2highlight
+  - nvim_buf_set_option
+  - nvim_win_set_option
+  - nvim_buf_set_option
+  - nvim_buf_set_option
+  - stage1
+  - fix_runtime_path
+  - nvim_set_option
+  - nvim_set_option
+  - nvim_get_option
+  - nvim_command
+  - nvim_command
+  - nvim_command
+  - detect_parent_process
+  - nvim_buf_set_option
+  - nvim_set_option
+  - nvim_set_option
+  - nvim_set_option
+  - stage2
+  - detect_filetype
+  - nvim_list_uis
+  - set_maps
+  - nvim_command
+  color: "#010181"
+- type: kwb
+  content:
+  - floor
+  - floor
+  - floor
+  - floor
+  - string
+  - format
+  - floor
+  - floor
+  - floor
+  - floor
+  - write
+  - string
+  - write
+  - table
+  - gsub
+  - table
+  - table
+  - gsub
+  - table
+  - table
+  - getenv
+  - getenv
+  - tonumber
+  - string
+  - next
+  - next
+  - gsub
+  - gsub
+  - string
+  - string
+  - tonumber
+  - tonumber
+  - tonumber
+  - tonumber
+  - tonumber
+  - tonumber
+  color: "#0057ae"
+- type: esc
+  content:
+  - "\\n"
+  - "\\194"
+  - "\\194"
+  - "\\160"
+  - "\\194\\160"
+  - "\\n"
+  - "\\b"
+  - "\\b"
+  - "\\b"
+  - "\\b"
+  - "\\b"
+  - "\\b"
+  - "\\b"
+  - "\\b"
+  - "\\\\"
+  - "\\\\"
+  color: "#ff00ff"

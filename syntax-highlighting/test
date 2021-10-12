@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+highlight -c example.css example.lua >example.html
+
+bundle exec ./syntax-highlighting example.css example.html >example.yml

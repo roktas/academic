@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="ISO-8859-1">
+<title>example.lua</title>
+<link rel="stylesheet" type="text/css" href="example.css">
+</head>
+<body class="hl">
+<pre class="hl"><span class="hl slc">-- Functions to use neovim as a pager.</span>
+
+<span class="hl slc">-- This code is a rewrite of two sources: vimcat and vimpager (which also</span>
+<span class="hl slc">-- conatins a version of vimcat).</span>
+<span class="hl slc">-- Vimcat back to Matthew J. Wozniski and can be found at</span>
+<span class="hl slc">-- https://github.com/godlygeek/vim-files/blob/master/macros/vimcat.sh</span>
+<span class="hl slc">-- Vimpager was written by Rafael Kitover and can be found at</span>
+<span class="hl slc">-- https://github.com/rkitover/vimpager</span>
+
+<span class="hl slc">-- Information about terminal escape codes:</span>
+<span class="hl slc">-- https://en.wikipedia.org/wiki/ANSI_escape_code</span>
+
+<span class="hl slc">-- Neovim defines this object but luacheck doesn&apos;t know it.  So we define a</span>
+<span class="hl slc">-- shortcut and tell luacheck to ignore it.</span>
+<span class="hl kwa">local</span> nvim <span class="hl opt">=</span> vim<span class="hl opt">.</span>api <span class="hl slc">-- luacheck: ignore</span>
+<span class="hl kwa">local</span> vim <span class="hl opt">=</span> vim      <span class="hl slc">-- luacheck: ignore</span>
+
+<span class="hl slc">-- A mapping of ansi color numbers to neovim color names</span>
+<span class="hl kwa">local</span> colors <span class="hl opt">= {</span>
+  <span class="hl opt">[</span><span class="hl num">0</span><span class="hl opt">] =</span> <span class="hl str">&quot;black&quot;</span><span class="hl opt">,     [</span><span class="hl num">8</span><span class="hl opt">] =</span> <span class="hl str">&quot;darkgray&quot;</span><span class="hl opt">,</span>
+  <span class="hl opt">[</span><span class="hl num">1</span><span class="hl opt">] =</span> <span class="hl str">&quot;red&quot;</span><span class="hl opt">,       [</span><span class="hl num">9</span><span class="hl opt">] =</span> <span class="hl str">&quot;lightred&quot;</span><span class="hl opt">,</span>
+  <span class="hl opt">[</span><span class="hl num">2</span><span class="hl opt">] =</span> <span class="hl str">&quot;green&quot;</span><span class="hl opt">,     [</span><span class="hl num">10</span><span class="hl opt">] =</span> <span class="hl str">&quot;lightgreen&quot;</span><span class="hl opt">,</span>
+  <span class="hl opt">[</span><span class="hl num">3</span><span class="hl opt">] =</span> <span class="hl str">&quot;yellow&quot;</span><span class="hl opt">,    [</span><span class="hl num">11</span><span class="hl opt">] =</span> <span class="hl str">&quot;lightyellow&quot;</span><span class="hl opt">,</span>
+  <span class="hl opt">[</span><span class="hl num">4</span><span class="hl opt">] =</span> <span class="hl str">&quot;blue&quot;</span><span class="hl opt">,      [</span><span class="hl num">12</span><span class="hl opt">] =</span> <span class="hl str">&quot;lightblue&quot;</span><span class="hl opt">,</span>
+  <span class="hl opt">[</span><span class="hl num">5</span><span class="hl opt">] =</span> <span class="hl str">&quot;magenta&quot;</span><span class="hl opt">,   [</span><span class="hl num">13</span><span class="hl opt">] =</span> <span class="hl str">&quot;lightmagenta&quot;</span><span class="hl opt">,</span>
+  <span class="hl opt">[</span><span class="hl num">6</span><span class="hl opt">] =</span> <span class="hl str">&quot;cyan&quot;</span><span class="hl opt">,      [</span><span class="hl num">14</span><span class="hl opt">] =</span> <span class="hl str">&quot;lightcyan&quot;</span><span class="hl opt">,</span>
+  <span class="hl opt">[</span><span class="hl num">7</span><span class="hl opt">] =</span> <span class="hl str">&quot;lightgray&quot;</span><span class="hl opt">, [</span><span class="hl num">15</span><span class="hl opt">] =</span> <span class="hl str">&quot;white&quot;</span><span class="hl opt">,</span>
+<span class="hl opt">}</span>
+
+<span class="hl slc">-- the names of neovim&apos;s highlighting attributes that are handled by this</span>
+<span class="hl slc">-- module</span>
+<span class="hl slc">-- Most attributes are refered to by their highlighting attribute name in</span>
+<span class="hl slc">-- neovim&apos;s :highlight command.</span>
+<span class="hl kwa">local</span> attributes <span class="hl opt">= {</span>
+  <span class="hl opt">[</span><span class="hl num">1</span><span class="hl opt">] =</span> <span class="hl str">&quot;bold&quot;</span><span class="hl opt">,</span>
+  <span class="hl slc">--[2] = &quot;faint&quot;, -- not handled by neovim</span>
+  <span class="hl opt">[</span><span class="hl num">3</span><span class="hl opt">] =</span> <span class="hl str">&quot;italic&quot;</span><span class="hl opt">,</span>
+  <span class="hl opt">[</span><span class="hl num">4</span><span class="hl opt">] =</span> <span class="hl str">&quot;underline&quot;</span><span class="hl opt">,</span>
+  <span class="hl slc">--[5] = &quot;slow blink&quot;, -- not handled by neovim</span>
+  <span class="hl slc">--[6] = &quot;underline&quot;, -- not handled by neovim</span>
+  <span class="hl opt">[</span><span class="hl num">7</span><span class="hl opt">] =</span> <span class="hl str">&quot;reverse&quot;</span><span class="hl opt">,</span>
+  <span class="hl opt">[</span><span class="hl num">8</span><span class="hl opt">] =</span> <span class="hl str">&quot;conceal&quot;</span><span class="hl opt">,</span>
+  <span class="hl opt">[</span><span class="hl num">9</span><span class="hl opt">] =</span> <span class="hl str">&quot;strikethrough&quot;</span><span class="hl opt">,</span>
+  <span class="hl slc">-- TODO when to use the gui attribute &quot;standout&quot;?</span>
+<span class="hl opt">}</span>
+
+<span class="hl slc">-- These variables will be initialized during the first call to cat_mode() or</span>
+<span class="hl slc">-- pager_mode().</span>
+<span class="hl slc">--</span>
+<span class="hl slc">-- A cache to map syntax groups to ansi escape sequences in cat mode or</span>
+<span class="hl slc">-- remember defined syntax groups in the ansi rendering functions.</span>
+<span class="hl kwa">local</span> cache <span class="hl opt">= {}</span>
+<span class="hl slc">-- A local copy of the termguicolors option, used for color output in cat</span>
+<span class="hl slc">-- mode.</span>
+<span class="hl kwa">local</span> colors_24_bit
+<span class="hl kwa">local</span> color2escape
+<span class="hl slc">-- This variable holds the name of the detected parent process for pager mode.</span>
+<span class="hl kwa">local</span> doc
+<span class="hl slc">-- A neovim highlight namespace to group together all highlights added to</span>
+<span class="hl slc">-- buffers by this module.</span>
+<span class="hl kwa">local</span> namespace
+
+<span class="hl slc">-- Split a 24 bit color number into the three red, green and blue values</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">split_rgb_number</span><span class="hl opt">(</span>color_number<span class="hl opt">)</span>
+  <span class="hl slc">-- The lua implementation of these bit shift operations is taken from</span>
+  <span class="hl slc">-- http://nova-fusion.com/2011/03/21/simulate-bitwise-shift-operators-in-lua</span>
+  <span class="hl kwa">local</span> r <span class="hl opt">=</span> math<span class="hl opt">.</span><span class="hl kwb">floor</span><span class="hl opt">(</span>color_number <span class="hl opt">/</span> <span class="hl num">2</span> ^ <span class="hl num">16</span><span class="hl opt">)</span>
+  <span class="hl kwa">local</span> g <span class="hl opt">=</span> math<span class="hl opt">.</span><span class="hl kwb">floor</span><span class="hl opt">(</span>math<span class="hl opt">.</span><span class="hl kwb">floor</span><span class="hl opt">(</span>color_number <span class="hl opt">/</span> <span class="hl num">2</span> ^ <span class="hl num">8</span><span class="hl opt">) %</span> <span class="hl num">2</span> ^ <span class="hl num">8</span><span class="hl opt">)</span>
+  <span class="hl kwa">local</span> b <span class="hl opt">=</span> math<span class="hl opt">.</span><span class="hl kwb">floor</span><span class="hl opt">(</span>color_number <span class="hl opt">%</span> <span class="hl num">2</span> ^ <span class="hl num">8</span><span class="hl opt">)</span>
+  <span class="hl kwa">return</span> r<span class="hl opt">,</span> g<span class="hl opt">,</span> b
+<span class="hl kwa">end</span>
+
+<span class="hl kwa">local function</span> <span class="hl kwd">hexformat_rgb_numbers</span><span class="hl opt">(</span>r<span class="hl opt">,</span> g<span class="hl opt">,</span> b<span class="hl opt">)</span>
+  <span class="hl kwa">return</span> <span class="hl kwb">string</span><span class="hl opt">.</span><span class="hl kwb">format</span><span class="hl opt">(</span><span class="hl str">&quot;#%06x&quot;</span><span class="hl opt">,</span> r <span class="hl opt">*</span> <span class="hl num">2</span>^<span class="hl num">16</span> <span class="hl opt">+</span> g <span class="hl opt">*</span> <span class="hl num">2</span>^<span class="hl num">8</span> <span class="hl opt">+</span> b<span class="hl opt">)</span>
+<span class="hl kwa">end</span>
+
+<span class="hl kwa">local function</span> <span class="hl kwd">split_predifined_terminal_color</span><span class="hl opt">(</span>color_number<span class="hl opt">)</span>
+  <span class="hl kwa">local</span> r <span class="hl opt">=</span> math<span class="hl opt">.</span><span class="hl kwb">floor</span><span class="hl opt">(</span>color_number <span class="hl opt">/</span> <span class="hl num">36</span><span class="hl opt">)</span>
+  <span class="hl kwa">local</span> g <span class="hl opt">=</span> math<span class="hl opt">.</span><span class="hl kwb">floor</span><span class="hl opt">(</span>math<span class="hl opt">.</span><span class="hl kwb">floor</span><span class="hl opt">(</span>color_number <span class="hl opt">/</span> <span class="hl num">6</span><span class="hl opt">) %</span> <span class="hl num">6</span><span class="hl opt">)</span>
+  <span class="hl kwa">local</span> b <span class="hl opt">=</span> math<span class="hl opt">.</span><span class="hl kwb">floor</span><span class="hl opt">(</span>color_number <span class="hl opt">%</span> <span class="hl num">6</span><span class="hl opt">)</span>
+  <span class="hl kwa">local</span> lookup <span class="hl opt">= {[</span><span class="hl num">0</span><span class="hl opt">]=</span><span class="hl num">0</span><span class="hl opt">, [</span><span class="hl num">1</span><span class="hl opt">]=</span><span class="hl num">95</span><span class="hl opt">, [</span><span class="hl num">2</span><span class="hl opt">]=</span><span class="hl num">135</span><span class="hl opt">, [</span><span class="hl num">3</span><span class="hl opt">]=</span><span class="hl num">175</span><span class="hl opt">, [</span><span class="hl num">4</span><span class="hl opt">]=</span><span class="hl num">215</span><span class="hl opt">, [</span><span class="hl num">5</span><span class="hl opt">]=</span><span class="hl num">255</span><span class="hl opt">}</span>
+  <span class="hl kwa">return</span> lookup<span class="hl opt">[</span>r<span class="hl opt">],</span> lookup<span class="hl opt">[</span>g<span class="hl opt">],</span> lookup<span class="hl opt">[</span>b<span class="hl opt">]</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Compute the escape sequences for a 24 bit color number.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">color2escape_24bit</span><span class="hl opt">(</span>color_number<span class="hl opt">,</span> foreground<span class="hl opt">)</span>
+  <span class="hl kwa">local</span> red<span class="hl opt">,</span> green<span class="hl opt">,</span> blue <span class="hl opt">=</span> <span class="hl kwd">split_rgb_number</span><span class="hl opt">(</span>color_number<span class="hl opt">)</span>
+  <span class="hl kwa">local</span> escape
+  <span class="hl kwa">if</span> foreground <span class="hl kwa">then</span>
+    escape <span class="hl opt">=</span> <span class="hl str">&apos;38;2;&apos;</span>
+  <span class="hl kwa">else</span>
+    escape <span class="hl opt">=</span> <span class="hl str">&apos;48;2;&apos;</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">return</span> escape <span class="hl opt">..</span> red <span class="hl opt">..</span> <span class="hl str">&apos;;&apos;</span> <span class="hl opt">..</span> green <span class="hl opt">..</span> <span class="hl str">&apos;;&apos;</span> <span class="hl opt">..</span> blue
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Compute the escape sequences for a 8 bit color number.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">color2escape_8bit</span><span class="hl opt">(</span>color_number<span class="hl opt">,</span> foreground<span class="hl opt">)</span>
+  <span class="hl kwa">local</span> prefix
+  <span class="hl kwa">if</span> color_number <span class="hl opt">&lt;</span> <span class="hl num">8</span> <span class="hl kwa">then</span>
+    <span class="hl kwa">if</span> foreground <span class="hl kwa">then</span>
+      prefix <span class="hl opt">=</span> <span class="hl str">&apos;3&apos;</span>
+    <span class="hl kwa">else</span>
+      prefix <span class="hl opt">=</span> <span class="hl str">&apos;4&apos;</span>
+    <span class="hl kwa">end</span>
+  <span class="hl kwa">elseif</span> color_number <span class="hl opt">&lt;</span> <span class="hl num">16</span> <span class="hl kwa">then</span>
+    color_number <span class="hl opt">=</span> color_number <span class="hl opt">-</span> <span class="hl num">8</span>
+    <span class="hl kwa">if</span> foreground <span class="hl kwa">then</span>
+      prefix <span class="hl opt">=</span> <span class="hl str">&apos;9&apos;</span>
+    <span class="hl kwa">else</span>
+      prefix <span class="hl opt">=</span> <span class="hl str">&apos;10&apos;</span>
+    <span class="hl kwa">end</span>
+  <span class="hl kwa">elseif</span> foreground <span class="hl kwa">then</span>
+    prefix <span class="hl opt">=</span> <span class="hl str">&apos;38;5;&apos;</span>
+  <span class="hl kwa">else</span>
+    prefix <span class="hl opt">=</span> <span class="hl str">&apos;48;5;&apos;</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">return</span> prefix <span class="hl opt">..</span> color_number
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Compute a ansi escape sequences to render a syntax group on the terminal.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">group2ansi</span><span class="hl opt">(</span>groupid<span class="hl opt">)</span>
+  <span class="hl kwa">if</span> cache<span class="hl opt">[</span>groupid<span class="hl opt">]</span> <span class="hl kwa">then</span>
+    <span class="hl kwa">return</span> cache<span class="hl opt">[</span>groupid<span class="hl opt">]</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">local</span> info <span class="hl opt">=</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_get_hl_by_id</span><span class="hl opt">(</span>groupid<span class="hl opt">,</span> colors_24_bit<span class="hl opt">)</span>
+  <span class="hl kwa">if</span> info<span class="hl opt">.</span>reverse <span class="hl kwa">then</span>
+    info<span class="hl opt">.</span>foreground<span class="hl opt">,</span> info<span class="hl opt">.</span>background <span class="hl opt">=</span> info<span class="hl opt">.</span>background<span class="hl opt">,</span> info<span class="hl opt">.</span>foreground
+  <span class="hl kwa">end</span>
+  <span class="hl slc">-- Reset all attributes before setting new ones.  The vimscript version did</span>
+  <span class="hl slc">-- use sevel explicit reset codes: 22, 24, 25, 27 and 28.  If no foreground</span>
+  <span class="hl slc">-- or background color was defined for a syntax item they were reset with</span>
+  <span class="hl slc">-- 39 or 49.</span>
+  <span class="hl kwa">local</span> escape <span class="hl opt">=</span> <span class="hl str">&apos;\27[0&apos;</span>
+
+  <span class="hl kwa">if</span> info<span class="hl opt">.</span>bold <span class="hl kwa">then</span> escape <span class="hl opt">=</span> escape <span class="hl opt">..</span> <span class="hl str">&apos;;1&apos;</span> <span class="hl kwa">end</span>
+  <span class="hl kwa">if</span> info<span class="hl opt">.</span>italic <span class="hl kwa">then</span> escape <span class="hl opt">=</span> escape <span class="hl opt">..</span> <span class="hl str">&apos;;3&apos;</span> <span class="hl kwa">end</span>
+  <span class="hl kwa">if</span> info<span class="hl opt">.</span>underline <span class="hl kwa">then</span> escape <span class="hl opt">=</span> escape <span class="hl opt">..</span> <span class="hl str">&apos;;4&apos;</span> <span class="hl kwa">end</span>
+
+  <span class="hl kwa">if</span> info<span class="hl opt">.</span>foreground <span class="hl kwa">then</span>
+    escape <span class="hl opt">=</span> escape <span class="hl opt">..</span> <span class="hl str">&apos;;&apos;</span> <span class="hl opt">..</span> <span class="hl kwd">color2escape</span><span class="hl opt">(</span>info<span class="hl opt">.</span>foreground<span class="hl opt">,</span> <span class="hl kwa">true</span><span class="hl opt">)</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">if</span> info<span class="hl opt">.</span>background <span class="hl kwa">then</span>
+    escape <span class="hl opt">=</span> escape <span class="hl opt">..</span> <span class="hl str">&apos;;&apos;</span> <span class="hl opt">..</span> <span class="hl kwd">color2escape</span><span class="hl opt">(</span>info<span class="hl opt">.</span>background<span class="hl opt">,</span> <span class="hl kwa">false</span><span class="hl opt">)</span>
+  <span class="hl kwa">end</span>
+
+  escape <span class="hl opt">=</span> escape <span class="hl opt">..</span> <span class="hl str">&apos;m&apos;</span>
+  cache<span class="hl opt">[</span>groupid<span class="hl opt">] =</span> escape
+  <span class="hl kwa">return</span> escape
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Initialize some module level variables for cat mode.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">init_cat_mode</span><span class="hl opt">()</span>
+  <span class="hl slc">-- Initialize the ansi group to color cache with the &quot;Normal&quot; hl group.</span>
+  cache<span class="hl opt">[</span><span class="hl num">0</span><span class="hl opt">] =</span> <span class="hl kwd">group2ansi</span><span class="hl opt">(</span>nvim<span class="hl opt">.</span><span class="hl kwd">nvim_call_function</span><span class="hl opt">(</span><span class="hl str">&apos;hlID&apos;</span><span class="hl opt">, {</span><span class="hl str">&apos;Normal&apos;</span><span class="hl opt">}))</span>
+  <span class="hl slc">-- Get the value of &amp;termguicolors from neovim.</span>
+  colors_24_bit <span class="hl opt">=</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_get_option</span><span class="hl opt">(</span><span class="hl str">&apos;termguicolors&apos;</span><span class="hl opt">)</span>
+  <span class="hl slc">-- Select the correct coloe escaping function.</span>
+  <span class="hl kwa">if</span> colors_24_bit <span class="hl kwa">then</span>
+    color2escape <span class="hl opt">=</span> color2escape_24bit
+  <span class="hl kwa">else</span>
+    color2escape <span class="hl opt">=</span> color2escape_8bit
+  <span class="hl kwa">end</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Check if the begining of the current buffer contains ansi escape sequences.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">check_escape_sequences</span><span class="hl opt">()</span>
+  <span class="hl kwa">local</span> filetype <span class="hl opt">=</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_get_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&apos;filetype&apos;</span><span class="hl opt">)</span>
+  <span class="hl kwa">if</span> filetype <span class="hl opt">==</span> <span class="hl str">&apos;&apos;</span> <span class="hl kwa">or</span> filetype <span class="hl opt">==</span> <span class="hl str">&apos;text&apos;</span> <span class="hl kwa">then</span>
+    <span class="hl kwa">for</span> _<span class="hl opt">,</span> line <span class="hl kwa">in</span> <span class="hl kwd">ipairs</span><span class="hl opt">(</span>nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_get_lines</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl num">0</span><span class="hl opt">,</span> <span class="hl num">100</span><span class="hl opt">,</span> <span class="hl kwa">false</span><span class="hl opt">))</span> <span class="hl kwa">do</span>
+      <span class="hl kwa">if</span> line<span class="hl opt">:</span><span class="hl kwd">find</span><span class="hl opt">(</span><span class="hl str">&apos;\27%[[;?]*[0-9.;]*[A-Za-z]&apos;</span><span class="hl opt">) ~=</span> <span class="hl kwa">nil then return true end</span>
+    <span class="hl kwa">end</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">return false</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Savely get the listchars option on different nvim versions</span>
+<span class="hl slc">--</span>
+<span class="hl slc">-- From release 0.4.3 to 0.4.4 the listchars option was changed from window</span>
+<span class="hl slc">-- local to global-local.  This affects the calls to either</span>
+<span class="hl slc">-- nvim_win_get_option or nvim_get_option so that there is no save way to call</span>
+<span class="hl slc">-- just one in all versions.</span>
+<span class="hl slc">--</span>
+<span class="hl slc">-- returns: string -- the listchars value</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">get_listchars</span><span class="hl opt">()</span>
+  <span class="hl slc">-- this works for newer versions of neovim</span>
+  <span class="hl kwa">local</span> status<span class="hl opt">,</span> data <span class="hl opt">=</span> <span class="hl kwd">pcall</span><span class="hl opt">(</span>nvim<span class="hl opt">.</span>nvim_get_option<span class="hl opt">,</span> <span class="hl str">&apos;listchars&apos;</span><span class="hl opt">)</span>
+  <span class="hl kwa">if</span> status <span class="hl kwa">then return</span> data <span class="hl kwa">end</span>
+  <span class="hl slc">-- this works for old neovim versions</span>
+  <span class="hl kwa">return</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_win_get_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&apos;listchars&apos;</span><span class="hl opt">)</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- turn a listchars string into a table</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">parse_listchars</span><span class="hl opt">(</span>listchars<span class="hl opt">)</span>
+  <span class="hl kwa">local</span> t <span class="hl opt">= {}</span>
+  <span class="hl kwa">for</span> item <span class="hl kwa">in</span> vim<span class="hl opt">.</span><span class="hl kwd">gsplit</span><span class="hl opt">(</span>listchars<span class="hl opt">,</span> <span class="hl str">&quot;,&quot;</span><span class="hl opt">,</span> <span class="hl kwa">true</span><span class="hl opt">)</span> <span class="hl kwa">do</span>
+    <span class="hl kwa">local</span> kv <span class="hl opt">=</span> vim<span class="hl opt">.</span><span class="hl kwd">split</span><span class="hl opt">(</span>item<span class="hl opt">,</span> <span class="hl str">&quot;:&quot;</span><span class="hl opt">,</span> <span class="hl kwa">true</span><span class="hl opt">)</span>
+    t<span class="hl opt">[</span>kv<span class="hl opt">[</span><span class="hl num">1</span>]] <span class="hl opt">=</span> kv<span class="hl opt">[</span><span class="hl num">2</span><span class="hl opt">]</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">return</span> t
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Iterate through the current buffer and print it to stdout with terminal</span>
+<span class="hl slc">-- color codes for highlighting.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">highlight</span><span class="hl opt">()</span>
+  <span class="hl slc">-- Detect an empty buffer, see :help line2byte().  We can not use</span>
+  <span class="hl slc">-- nvim_buf_get_lines as the table will contain one empty string for both an</span>
+  <span class="hl slc">-- empty file and a file with just one empty line.</span>
+  <span class="hl kwa">if</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_line_count</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">) ==</span> <span class="hl num">1</span> <span class="hl kwa">and</span>
+    nvim<span class="hl opt">.</span><span class="hl kwd">nvim_call_function</span><span class="hl opt">(</span><span class="hl str">&quot;line2byte&quot;</span><span class="hl opt">, {</span><span class="hl num">2</span><span class="hl opt">}) == -</span><span class="hl num">1</span> <span class="hl kwa">then</span>
+    <span class="hl kwa">return</span>
+  <span class="hl kwa">elseif</span> <span class="hl kwd">check_escape_sequences</span><span class="hl opt">()</span> <span class="hl kwa">then</span>
+    <span class="hl kwa">for</span> _<span class="hl opt">,</span> line <span class="hl kwa">in</span> <span class="hl kwd">ipairs</span><span class="hl opt">(</span>nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_get_lines</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl num">0</span><span class="hl opt">, -</span><span class="hl num">1</span><span class="hl opt">,</span> <span class="hl kwa">false</span><span class="hl opt">))</span> <span class="hl kwa">do</span>
+      io<span class="hl opt">.</span><span class="hl kwb">write</span><span class="hl opt">(</span>line<span class="hl opt">,</span> <span class="hl str">&apos;</span><span class="hl esc">\n</span><span class="hl str">&apos;</span><span class="hl opt">)</span>
+    <span class="hl kwa">end</span>
+    <span class="hl kwa">return</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">local</span> conceallevel <span class="hl opt">=</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_win_get_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&apos;conceallevel&apos;</span><span class="hl opt">)</span>
+  <span class="hl kwa">local</span> syntax_id_conceal <span class="hl opt">=</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_call_function</span><span class="hl opt">(</span><span class="hl str">&apos;hlID&apos;</span><span class="hl opt">, {</span><span class="hl str">&apos;Conceal&apos;</span><span class="hl opt">})</span>
+  <span class="hl kwa">local</span> syntax_id_whitespace <span class="hl opt">=</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_call_function</span><span class="hl opt">(</span><span class="hl str">&apos;hlID&apos;</span><span class="hl opt">, {</span><span class="hl str">&apos;Whitespace&apos;</span><span class="hl opt">})</span>
+  <span class="hl kwa">local</span> syntax_id_non_text <span class="hl opt">=</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_call_function</span><span class="hl opt">(</span><span class="hl str">&apos;hlID&apos;</span><span class="hl opt">, {</span><span class="hl str">&apos;NonText&apos;</span><span class="hl opt">})</span>
+  <span class="hl kwa">local</span> list <span class="hl opt">=</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_win_get_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&quot;list&quot;</span><span class="hl opt">)</span>
+  <span class="hl kwa">local</span> listchars <span class="hl opt">=</span> list <span class="hl kwa">and</span> <span class="hl kwd">parse_listchars</span><span class="hl opt">(</span><span class="hl kwd">get_listchars</span><span class="hl opt">())</span> <span class="hl kwa">or</span> <span class="hl opt">{}</span>
+  <span class="hl kwa">local</span> last_syntax_id <span class="hl opt">= -</span><span class="hl num">1</span>
+  <span class="hl kwa">local</span> last_conceal_id <span class="hl opt">= -</span><span class="hl num">1</span>
+  <span class="hl kwa">local</span> linecount <span class="hl opt">=</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_line_count</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">)</span>
+  <span class="hl kwa">for</span> lnum<span class="hl opt">,</span> line <span class="hl kwa">in</span> <span class="hl kwd">ipairs</span><span class="hl opt">(</span>nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_get_lines</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl num">0</span><span class="hl opt">, -</span><span class="hl num">1</span><span class="hl opt">,</span> <span class="hl kwa">false</span><span class="hl opt">))</span> <span class="hl kwa">do</span>
+    <span class="hl kwa">local</span> outline <span class="hl opt">=</span> <span class="hl str">&apos;&apos;</span>
+    <span class="hl kwa">local</span> skip_next_char <span class="hl opt">=</span> <span class="hl kwa">false</span>
+    <span class="hl kwa">for</span> cnum <span class="hl opt">=</span> <span class="hl num">1</span><span class="hl opt">,</span> line<span class="hl opt">:</span><span class="hl kwd">len</span><span class="hl opt">()</span> <span class="hl kwa">do</span>
+      <span class="hl kwa">local</span> conceal_info <span class="hl opt">=</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_call_function</span><span class="hl opt">(</span><span class="hl str">&apos;synconcealed&apos;</span><span class="hl opt">,</span>
+	<span class="hl opt">{</span>lnum<span class="hl opt">,</span> cnum<span class="hl opt">})</span>
+      <span class="hl kwa">local</span> conceal <span class="hl opt">=</span> conceal_info<span class="hl opt">[</span><span class="hl num">1</span><span class="hl opt">] ==</span> <span class="hl num">1</span>
+      <span class="hl kwa">local</span> replace <span class="hl opt">=</span> conceal_info<span class="hl opt">[</span><span class="hl num">2</span><span class="hl opt">]</span>
+      <span class="hl kwa">local</span> conceal_id <span class="hl opt">=</span> conceal_info<span class="hl opt">[</span><span class="hl num">3</span><span class="hl opt">]</span>
+      <span class="hl kwa">if</span> skip_next_char <span class="hl kwa">then</span>
+	skip_next_char <span class="hl opt">=</span> <span class="hl kwa">false</span>
+      <span class="hl kwa">elseif</span> conceal <span class="hl kwa">and</span> last_conceal_id <span class="hl opt">==</span> conceal_id <span class="hl kwa">then</span> <span class="hl slc">-- luacheck: ignore</span>
+	<span class="hl slc">-- skip this char</span>
+      <span class="hl kwa">else</span>
+	<span class="hl kwa">local</span> syntax_id<span class="hl opt">,</span> append
+	<span class="hl kwa">if</span> conceal <span class="hl kwa">then</span>
+	  syntax_id <span class="hl opt">=</span> syntax_id_conceal
+	  <span class="hl kwa">if</span> replace <span class="hl opt">==</span> <span class="hl str">&apos;&apos;</span> <span class="hl kwa">and</span> conceallevel <span class="hl opt">==</span> <span class="hl num">1</span> <span class="hl kwa">then</span> replace <span class="hl opt">=</span> <span class="hl str">&apos; &apos;</span> <span class="hl kwa">end</span>
+	  append <span class="hl opt">=</span> replace
+	  last_conceal_id <span class="hl opt">=</span> conceal_id
+	<span class="hl kwa">else</span>
+	  append <span class="hl opt">=</span> line<span class="hl opt">:</span><span class="hl kwd">sub</span><span class="hl opt">(</span>cnum<span class="hl opt">,</span> cnum<span class="hl opt">)</span>
+	  <span class="hl kwa">if</span> list <span class="hl kwa">and</span> <span class="hl kwb">string</span><span class="hl opt">.</span><span class="hl kwd">find</span><span class="hl opt">(</span><span class="hl str">&quot;</span> <span class="hl esc">\194</span><span class="hl str">&quot;</span><span class="hl opt">,</span> append<span class="hl opt">,</span> <span class="hl num">1</span><span class="hl opt">,</span> <span class="hl kwa">true</span><span class="hl opt">) ~=</span> <span class="hl kwa">nil then</span>
+	    syntax_id <span class="hl opt">=</span> syntax_id_whitespace
+	    <span class="hl kwa">if</span> append <span class="hl opt">==</span> <span class="hl str">&quot; &quot;</span> <span class="hl kwa">then</span>
+	      <span class="hl kwa">if</span> line<span class="hl opt">:</span><span class="hl kwd">find</span><span class="hl opt">(</span><span class="hl str">&quot;^ +$&quot;</span><span class="hl opt">,</span> cnum<span class="hl opt">) ~=</span> <span class="hl kwa">nil then</span>
+		append <span class="hl opt">=</span> listchars<span class="hl opt">.</span>trail <span class="hl kwa">or</span> listchars<span class="hl opt">.</span>space <span class="hl kwa">or</span> append
+	      <span class="hl kwa">else</span>
+		append <span class="hl opt">=</span> listchars<span class="hl opt">.</span>space <span class="hl kwa">or</span> append
+	      <span class="hl kwa">end</span>
+	    <span class="hl kwa">elseif</span> append <span class="hl opt">==</span> <span class="hl str">&quot;</span><span class="hl esc">\194</span><span class="hl str">&quot;</span> <span class="hl kwa">and</span> line<span class="hl opt">:</span><span class="hl kwd">sub</span><span class="hl opt">(</span>cnum <span class="hl opt">+</span> <span class="hl num">1</span><span class="hl opt">,</span> cnum <span class="hl opt">+</span> <span class="hl num">1</span><span class="hl opt">) ==</span> <span class="hl str">&quot;</span><span class="hl esc">\160</span><span class="hl str">&quot;</span> <span class="hl kwa">then</span>
+	      <span class="hl slc">-- Utf8 non breaking space is &quot;\194\160&quot;, neovim represents all</span>
+	      <span class="hl slc">-- files as utf8 internally, regardless of the actual encoding.</span>
+	      <span class="hl slc">-- See :help &apos;encoding&apos;.</span>
+	      append <span class="hl opt">=</span> listchars<span class="hl opt">.</span>nbsp <span class="hl kwa">or</span> <span class="hl str">&quot;</span><span class="hl esc">\194\160</span><span class="hl str">&quot;</span>
+	      skip_next_char <span class="hl opt">=</span> <span class="hl kwa">true</span>
+	    <span class="hl kwa">end</span>
+	  <span class="hl kwa">else</span>
+	    syntax_id <span class="hl opt">=</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_call_function</span><span class="hl opt">(</span><span class="hl str">&apos;synID&apos;</span><span class="hl opt">, {</span>lnum<span class="hl opt">,</span> cnum<span class="hl opt">,</span> <span class="hl kwa">true</span><span class="hl opt">})</span>
+	  <span class="hl kwa">end</span>
+	<span class="hl kwa">end</span>
+	<span class="hl kwa">if</span> syntax_id <span class="hl opt">~=</span> last_syntax_id <span class="hl kwa">then</span>
+	  outline <span class="hl opt">=</span> outline <span class="hl opt">..</span> <span class="hl kwd">group2ansi</span><span class="hl opt">(</span>syntax_id<span class="hl opt">)</span>
+	  last_syntax_id <span class="hl opt">=</span> syntax_id
+	<span class="hl kwa">end</span>
+	outline <span class="hl opt">=</span> outline <span class="hl opt">..</span> append
+      <span class="hl kwa">end</span>
+    <span class="hl kwa">end</span>
+    <span class="hl slc">-- append a eol listchar if &amp;list is set</span>
+    <span class="hl kwa">if</span> list <span class="hl kwa">and</span> listchars<span class="hl opt">.</span>eol <span class="hl opt">~=</span> <span class="hl kwa">nil then</span>
+      syntax_id <span class="hl opt">=</span> syntax_id_non_text
+      <span class="hl kwa">if</span> syntax_id <span class="hl opt">~=</span> last_syntax_id <span class="hl kwa">then</span>
+	outline <span class="hl opt">=</span> outline <span class="hl opt">..</span> <span class="hl kwd">group2ansi</span><span class="hl opt">(</span>syntax_id<span class="hl opt">)</span>
+	last_syntax_id <span class="hl opt">=</span> syntax_id
+      <span class="hl kwa">end</span>
+      outline <span class="hl opt">=</span> outline <span class="hl opt">..</span> listchars<span class="hl opt">.</span>eol
+    <span class="hl kwa">end</span>
+    <span class="hl slc">-- Write the whole line and a newline char.  If this was the last line</span>
+    <span class="hl slc">-- also reset the terminal attributes.</span>
+    io<span class="hl opt">.</span><span class="hl kwb">write</span><span class="hl opt">(</span>outline<span class="hl opt">,</span> lnum <span class="hl opt">==</span> linecount <span class="hl kwa">and</span> cache<span class="hl opt">[</span><span class="hl num">0</span><span class="hl opt">]</span> <span class="hl kwa">or</span> <span class="hl str">&apos;&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;</span><span class="hl esc">\n</span><span class="hl str">&apos;</span><span class="hl opt">)</span>
+  <span class="hl kwa">end</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Call the highlight function to write the highlighted version of all buffers</span>
+<span class="hl slc">-- to stdout and quit nvim.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">cat_mode</span><span class="hl opt">()</span>
+  <span class="hl kwd">init_cat_mode</span><span class="hl opt">()</span>
+  <span class="hl kwd">highlight</span><span class="hl opt">()</span>
+  <span class="hl slc">-- We can not use nvim_list_bufs() as a file might appear on the command</span>
+  <span class="hl slc">-- line twice.  In this case we want to behave like cat(1) and display the</span>
+  <span class="hl slc">-- file twice.</span>
+  <span class="hl kwa">for</span> _ <span class="hl opt">=</span> <span class="hl num">2</span><span class="hl opt">,</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_call_function</span><span class="hl opt">(</span><span class="hl str">&apos;argc&apos;</span><span class="hl opt">, {})</span> <span class="hl kwa">do</span>
+    nvim<span class="hl opt">.</span><span class="hl kwd">nvim_command</span><span class="hl opt">(</span><span class="hl str">&apos;next&apos;</span><span class="hl opt">)</span>
+    <span class="hl kwd">highlight</span><span class="hl opt">()</span>
+  <span class="hl kwa">end</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_command</span><span class="hl opt">(</span><span class="hl str">&apos;quitall!&apos;</span><span class="hl opt">)</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Replace a string prefix in all items in a list</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">replace_prefix</span><span class="hl opt">(</span><span class="hl kwb">table</span><span class="hl opt">,</span> old_prefix<span class="hl opt">,</span> new_prefix<span class="hl opt">)</span>
+  <span class="hl slc">-- Escape all punctuation chars to protect from lua pattern chars.</span>
+  old_prefix <span class="hl opt">=</span> old_prefix<span class="hl opt">:</span><span class="hl kwb">gsub</span><span class="hl opt">(</span><span class="hl str">&apos;[^%w]&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;%%%0&apos;</span><span class="hl opt">)</span>
+  <span class="hl kwa">for</span> index<span class="hl opt">,</span> value <span class="hl kwa">in</span> <span class="hl kwd">ipairs</span><span class="hl opt">(</span><span class="hl kwb">table</span><span class="hl opt">)</span> <span class="hl kwa">do</span>
+    <span class="hl kwb">table</span><span class="hl opt">[</span>index<span class="hl opt">] =</span> value<span class="hl opt">:</span><span class="hl kwb">gsub</span><span class="hl opt">(</span><span class="hl str">&apos;^&apos;</span> <span class="hl opt">..</span> old_prefix<span class="hl opt">,</span> new_prefix<span class="hl opt">,</span> <span class="hl num">1</span><span class="hl opt">)</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">return</span> <span class="hl kwb">table</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Fix the runtimepath.  All user nvim folders are replaced by corresponding</span>
+<span class="hl slc">-- nvimpager folders.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">fix_runtime_path</span><span class="hl opt">()</span>
+  <span class="hl kwa">local</span> runtimepath <span class="hl opt">=</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_list_runtime_paths</span><span class="hl opt">()</span>
+  <span class="hl slc">-- Remove the custom nvimpager entry that was added on the command line.</span>
+  runtimepath<span class="hl opt">[#</span>runtimepath<span class="hl opt">] =</span> <span class="hl kwa">nil</span>
+  <span class="hl kwa">local</span> new
+  <span class="hl kwa">for</span> _<span class="hl opt">,</span> name <span class="hl kwa">in</span> <span class="hl kwd">ipairs</span><span class="hl opt">({</span><span class="hl str">&quot;config&quot;</span><span class="hl opt">,</span> <span class="hl str">&quot;data&quot;</span><span class="hl opt">})</span> <span class="hl kwa">do</span>
+    <span class="hl kwa">local</span> original <span class="hl opt">=</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_call_function</span><span class="hl opt">(</span><span class="hl str">&quot;stdpath&quot;</span><span class="hl opt">, {</span>name<span class="hl opt">})</span>
+    new <span class="hl opt">=</span> original <span class="hl opt">..</span><span class="hl str">&quot;pager&quot;</span>
+    runtimepath <span class="hl opt">=</span> <span class="hl kwd">replace_prefix</span><span class="hl opt">(</span>runtimepath<span class="hl opt">,</span> original<span class="hl opt">,</span> new<span class="hl opt">)</span>
+  <span class="hl kwa">end</span>
+  runtimepath <span class="hl opt">=</span> <span class="hl kwb">table</span><span class="hl opt">.</span><span class="hl kwd">concat</span><span class="hl opt">(</span>runtimepath<span class="hl opt">,</span> <span class="hl str">&quot;,&quot;</span><span class="hl opt">)</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_set_option</span><span class="hl opt">(</span><span class="hl str">&quot;packpath&quot;</span><span class="hl opt">,</span> runtimepath<span class="hl opt">)</span>
+  runtimepath <span class="hl opt">=</span> os<span class="hl opt">.</span><span class="hl kwb">getenv</span><span class="hl opt">(</span><span class="hl str">&quot;RUNTIME&quot;</span><span class="hl opt">) ..</span> <span class="hl str">&quot;,&quot;</span> <span class="hl opt">..</span> runtimepath
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_set_option</span><span class="hl opt">(</span><span class="hl str">&quot;runtimepath&quot;</span><span class="hl opt">,</span> runtimepath<span class="hl opt">)</span>
+  new <span class="hl opt">=</span> new <span class="hl opt">..</span> <span class="hl str">&apos;/rplugin.vim&apos;</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_command</span><span class="hl opt">(</span><span class="hl str">&quot;let $NVIM_RPLUGIN_MANIFEST = &apos;&quot;</span> <span class="hl opt">..</span> new <span class="hl opt">..</span> <span class="hl str">&quot;&apos;&quot;</span><span class="hl opt">)</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Parse the command of the calling process to detect some common</span>
+<span class="hl slc">-- documentation programs (man, pydoc, perldoc, git, ...).  $PARENT was</span>
+<span class="hl slc">-- exported by the calling bash script and points to the calling program.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">detect_parent_process</span><span class="hl opt">()</span>
+  <span class="hl kwa">local</span> ppid <span class="hl opt">=</span> os<span class="hl opt">.</span><span class="hl kwb">getenv</span><span class="hl opt">(</span><span class="hl str">&apos;PARENT&apos;</span><span class="hl opt">)</span>
+  <span class="hl kwa">if not</span> ppid <span class="hl kwa">then return nil end</span>
+  <span class="hl kwa">local</span> proc <span class="hl opt">=</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_get_proc</span><span class="hl opt">(</span><span class="hl kwb">tonumber</span><span class="hl opt">(</span>ppid<span class="hl opt">))</span>
+  <span class="hl kwa">if</span> proc <span class="hl opt">==</span> <span class="hl kwa">nil then return</span> <span class="hl str">&apos;none&apos;</span> <span class="hl kwa">end</span>
+  <span class="hl kwa">local</span> command <span class="hl opt">=</span> proc<span class="hl opt">.</span>name
+  <span class="hl kwa">if</span> command <span class="hl opt">==</span> <span class="hl str">&apos;man&apos;</span> <span class="hl kwa">then</span>
+    <span class="hl kwa">return</span> <span class="hl str">&apos;man&apos;</span>
+  <span class="hl kwa">elseif</span> command<span class="hl opt">:</span><span class="hl kwd">find</span><span class="hl opt">(</span><span class="hl str">&apos;^[Pp]ython[0-9.]*&apos;</span><span class="hl opt">) ~=</span> <span class="hl kwa">nil or</span>
+	 command<span class="hl opt">:</span><span class="hl kwd">find</span><span class="hl opt">(</span><span class="hl str">&apos;^[Pp]ydoc[0-9.]*&apos;</span><span class="hl opt">) ~=</span> <span class="hl kwa">nil then</span>
+    <span class="hl kwa">return</span> <span class="hl str">&apos;pydoc&apos;</span>
+  <span class="hl kwa">elseif</span> command <span class="hl opt">==</span> <span class="hl str">&apos;ruby&apos;</span> <span class="hl kwa">or</span> command <span class="hl opt">==</span> <span class="hl str">&apos;irb&apos;</span> <span class="hl kwa">or</span> command <span class="hl opt">==</span> <span class="hl str">&apos;ri&apos;</span> <span class="hl kwa">then</span>
+    <span class="hl kwa">return</span> <span class="hl str">&apos;ri&apos;</span>
+  <span class="hl kwa">elseif</span> command <span class="hl opt">==</span> <span class="hl str">&apos;perl&apos;</span> <span class="hl kwa">or</span> command <span class="hl opt">==</span> <span class="hl str">&apos;perldoc&apos;</span> <span class="hl kwa">then</span>
+    <span class="hl kwa">return</span> <span class="hl str">&apos;perldoc&apos;</span>
+  <span class="hl kwa">elseif</span> command <span class="hl opt">==</span> <span class="hl str">&apos;git&apos;</span> <span class="hl kwa">then</span>
+    <span class="hl kwa">return</span> <span class="hl str">&apos;git&apos;</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">return nil</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Search the begining of the current buffer to detect if it contains a man</span>
+<span class="hl slc">-- page.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">detect_man_page_in_current_buffer</span><span class="hl opt">()</span>
+  <span class="hl slc">-- Only check the first twelve lines (for speed).</span>
+  <span class="hl kwa">for</span> _<span class="hl opt">,</span> line <span class="hl kwa">in</span> <span class="hl kwd">ipairs</span><span class="hl opt">(</span>nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_get_lines</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl num">0</span><span class="hl opt">,</span> <span class="hl num">12</span><span class="hl opt">,</span> <span class="hl kwa">false</span><span class="hl opt">))</span> <span class="hl kwa">do</span>
+    <span class="hl slc">-- Check if the line contains the string &quot;NAME&quot; or &quot;NAME&quot; with every</span>
+    <span class="hl slc">-- character overwritten by itself.</span>
+    <span class="hl slc">-- An earlier version of this code did also check if there are whitespace</span>
+    <span class="hl slc">-- characters at the end of the line.  I could not find a man pager where</span>
+    <span class="hl slc">-- this was the case.</span>
+    <span class="hl slc">-- FIXME This only works for man pages in languages where &quot;NAME&quot; is used</span>
+    <span class="hl slc">-- as the headline.  Some (not all!) German man pages use &quot;BBEZEICHNUNG&quot;</span>
+    <span class="hl slc">-- instead.</span>
+    <span class="hl kwa">if</span> line <span class="hl opt">==</span> <span class="hl str">&apos;NAME&apos;</span> <span class="hl kwa">or</span> line <span class="hl opt">==</span> <span class="hl str">&apos;N</span><span class="hl esc">\b</span><span class="hl str">NA</span><span class="hl esc">\b</span><span class="hl str">AM</span><span class="hl esc">\b</span><span class="hl str">ME</span><span class="hl esc">\b</span><span class="hl str">E&apos;</span> <span class="hl kwa">or</span> line <span class="hl opt">==</span> <span class="hl str">&quot;Name&quot;</span>
+      <span class="hl kwa">or</span> line <span class="hl opt">==</span> <span class="hl str">&apos;N</span><span class="hl esc">\b</span><span class="hl str">Na</span><span class="hl esc">\b</span><span class="hl str">am</span><span class="hl esc">\b</span><span class="hl str">me</span><span class="hl esc">\b</span><span class="hl str">e&apos;</span> <span class="hl kwa">then</span>
+      <span class="hl kwa">return true</span>
+    <span class="hl kwa">end</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">return false</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Remove ansi escape sequences from the current buffer.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">strip_ansi_escape_sequences_from_current_buffer</span><span class="hl opt">()</span>
+  <span class="hl kwa">local</span> modifiable <span class="hl opt">=</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_get_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&quot;modifiable&quot;</span><span class="hl opt">)</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_set_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&quot;modifiable&quot;</span><span class="hl opt">,</span> <span class="hl kwa">true</span><span class="hl opt">)</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_command</span><span class="hl opt">(</span>
+    <span class="hl str">[=[keepjumps silent %substitute/\v\e\[[;?]*[0-9.;]*[a-z]//egi]=]</span><span class="hl opt">)</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_win_set_cursor</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">, {</span><span class="hl num">1</span><span class="hl opt">,</span> <span class="hl num">0</span><span class="hl opt">})</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_set_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&quot;modifiable&quot;</span><span class="hl opt">,</span> modifiable<span class="hl opt">)</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Detect possible filetypes for the current buffer by looking at the pstree</span>
+<span class="hl slc">-- or ansi escape sequences or manpage sequences in the current buffer.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">detect_filetype</span><span class="hl opt">()</span>
+  <span class="hl kwa">if not</span> doc <span class="hl kwa">and</span> <span class="hl kwd">detect_man_page_in_current_buffer</span><span class="hl opt">()</span> <span class="hl kwa">then</span> doc <span class="hl opt">=</span> <span class="hl str">&apos;man&apos;</span> <span class="hl kwa">end</span>
+  <span class="hl kwa">if</span> doc <span class="hl opt">==</span> <span class="hl str">&apos;git&apos;</span> <span class="hl kwa">then</span>
+    <span class="hl slc">-- Use nvim&apos;s syntax highlighting for git buffers instead of git&apos;s</span>
+    <span class="hl slc">-- internal highlighting.</span>
+    <span class="hl kwd">strip_ansi_escape_sequences_from_current_buffer</span><span class="hl opt">()</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">if</span> doc <span class="hl opt">==</span> <span class="hl str">&apos;man&apos;</span> <span class="hl kwa">then</span>
+    nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_set_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&apos;readonly&apos;</span><span class="hl opt">,</span> <span class="hl kwa">false</span><span class="hl opt">)</span>
+    nvim<span class="hl opt">.</span><span class="hl kwd">nvim_command</span><span class="hl opt">(</span><span class="hl str">&quot;Man!&quot;</span><span class="hl opt">)</span>
+    nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_set_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&apos;readonly&apos;</span><span class="hl opt">,</span> <span class="hl kwa">true</span><span class="hl opt">)</span>
+  <span class="hl kwa">elseif</span> doc <span class="hl opt">==</span> <span class="hl str">&apos;pydoc&apos;</span> <span class="hl kwa">or</span> doc <span class="hl opt">==</span> <span class="hl str">&apos;perldoc&apos;</span> <span class="hl kwa">or</span> doc <span class="hl opt">==</span> <span class="hl str">&apos;ri&apos;</span> <span class="hl kwa">then</span>
+    doc <span class="hl opt">=</span> <span class="hl str">&apos;man&apos;</span> <span class="hl slc">-- only set the syntax, not the full :Man plugin</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">if</span> doc <span class="hl opt">~=</span> <span class="hl kwa">nil then</span>
+    nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_set_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&apos;filetype&apos;</span><span class="hl opt">,</span> doc<span class="hl opt">)</span>
+  <span class="hl kwa">end</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Create an iterator that tokenizes the given input string into ansi escape</span>
+<span class="hl slc">-- sequences.</span>
+<span class="hl slc">--</span>
+<span class="hl slc">-- Lua patterns for string.gmatch</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">tokenize</span><span class="hl opt">(</span>input_string<span class="hl opt">)</span>
+  <span class="hl slc">-- The empty input string is a special case where we return one single</span>
+  <span class="hl slc">-- token.</span>
+  <span class="hl kwa">if</span> input_string <span class="hl opt">==</span> <span class="hl str">&quot;&quot;</span> <span class="hl kwa">then return</span> <span class="hl kwb">string</span><span class="hl opt">.</span><span class="hl kwd">gmatch</span><span class="hl opt">(</span><span class="hl str">&quot;&quot;</span><span class="hl opt">,</span> <span class="hl str">&quot;&quot;</span><span class="hl opt">)</span> <span class="hl kwa">end</span>
+  <span class="hl slc">-- we keep track of the position in the input with a local variable so that</span>
+  <span class="hl slc">-- our &quot;next&quot; function does not need to rely on the second argument.</span>
+  <span class="hl slc">-- Especially if a token appears twice in the input that might be of</span>
+  <span class="hl slc">-- importance.</span>
+  <span class="hl kwa">local</span> position <span class="hl opt">=</span> <span class="hl num">1</span>
+  <span class="hl kwa">local function</span> <span class="hl kwb">next</span><span class="hl opt">(</span>input<span class="hl opt">)</span>
+    <span class="hl slc">-- If the position we are currently tokenizing is beyond the input string</span>
+    <span class="hl slc">-- return nil =&gt; stop tokenizing.</span>
+    <span class="hl kwa">if</span> input<span class="hl opt">:</span><span class="hl kwd">len</span><span class="hl opt">() &lt;</span> position <span class="hl kwa">then return nil end</span>
+
+    <span class="hl slc">-- If we are on the last character and it is a semicolon, return an empty</span>
+    <span class="hl slc">-- token and move position beyond the input to stop on the next call.</span>
+    <span class="hl slc">-- This is hard to handle properly in the tokenizer below.</span>
+    <span class="hl kwa">if</span> input<span class="hl opt">:</span><span class="hl kwd">len</span><span class="hl opt">() ==</span> position <span class="hl kwa">and</span> input<span class="hl opt">:</span><span class="hl kwd">sub</span><span class="hl opt">(-</span><span class="hl num">1</span><span class="hl opt">) ==</span> <span class="hl str">&quot;;&quot;</span> <span class="hl kwa">then</span>
+      position <span class="hl opt">=</span> position <span class="hl opt">+</span> <span class="hl num">1</span>
+      <span class="hl kwa">return</span> <span class="hl str">&quot;&quot;</span>
+    <span class="hl kwa">end</span>
+
+    <span class="hl slc">-- first check for the special sequences &quot;38;&quot; &quot;48;&quot;</span>
+    <span class="hl kwa">local</span> init <span class="hl opt">=</span> input<span class="hl opt">:</span><span class="hl kwd">sub</span><span class="hl opt">(</span>position<span class="hl opt">,</span> position<span class="hl opt">+</span><span class="hl num">2</span><span class="hl opt">)</span>
+    <span class="hl kwa">if</span> init <span class="hl opt">==</span> <span class="hl str">&quot;38;&quot;</span> <span class="hl kwa">or</span> init <span class="hl opt">==</span> <span class="hl str">&quot;48;&quot;</span> <span class="hl kwa">then</span>
+      <span class="hl slc">-- Try to match an 8 bit or a 24 bit color sequence</span>
+      <span class="hl kwa">local</span> patterns <span class="hl opt">= {</span><span class="hl str">&quot;([34])8;5;(%d+);?&quot;</span><span class="hl opt">,</span> <span class="hl str">&quot;([34])8;2;(%d+);(%d+);(%d+);?&quot;</span><span class="hl opt">}</span>
+      <span class="hl kwa">for</span> _<span class="hl opt">,</span> pattern <span class="hl kwa">in</span> <span class="hl kwd">ipairs</span><span class="hl opt">(</span>patterns<span class="hl opt">)</span> <span class="hl kwa">do</span>
+	<span class="hl kwa">local</span> start<span class="hl opt">,</span> stop<span class="hl opt">,</span> token<span class="hl opt">,</span> c1<span class="hl opt">,</span> c2<span class="hl opt">,</span> c3 <span class="hl opt">=</span> input<span class="hl opt">:</span><span class="hl kwd">find</span><span class="hl opt">(</span>pattern<span class="hl opt">,</span> position<span class="hl opt">)</span>
+	<span class="hl kwa">if</span> start <span class="hl opt">==</span> position <span class="hl kwa">then</span>
+	  position <span class="hl opt">=</span> stop <span class="hl opt">+</span> <span class="hl num">1</span>
+	  <span class="hl kwa">return</span> token <span class="hl opt">==</span> <span class="hl str">&quot;3&quot;</span> <span class="hl kwa">and</span> <span class="hl str">&quot;foreground&quot;</span> <span class="hl kwa">or</span> <span class="hl str">&quot;background&quot;</span><span class="hl opt">,</span> c1<span class="hl opt">,</span> c2<span class="hl opt">,</span> c3
+	<span class="hl kwa">end</span>
+      <span class="hl kwa">end</span>
+      <span class="hl slc">-- If no valid special sequence was found we fall through to the normal</span>
+      <span class="hl slc">-- tokenization.</span>
+    <span class="hl kwa">end</span>
+
+    <span class="hl slc">-- handle all other tokens, we expect a simple number followed by either a</span>
+    <span class="hl slc">-- semicolon or the end of the string, or the end of the input string</span>
+    <span class="hl slc">-- directly.</span>
+    <span class="hl kwa">local</span> oldpos <span class="hl opt">=</span> position
+    <span class="hl kwa">local</span> next_pos <span class="hl opt">=</span> input<span class="hl opt">:</span><span class="hl kwd">find</span><span class="hl opt">(</span><span class="hl str">&quot;;&quot;</span><span class="hl opt">,</span> position<span class="hl opt">)</span>
+    <span class="hl kwa">if</span> next_pos <span class="hl opt">==</span> <span class="hl kwa">nil then</span>
+      <span class="hl slc">-- no further semicolon was found, we reached the end of the input</span>
+      <span class="hl slc">-- string, the next call to this function will return nil</span>
+      position <span class="hl opt">=</span> input<span class="hl opt">:</span><span class="hl kwd">len</span><span class="hl opt">() +</span> <span class="hl num">1</span>
+      <span class="hl kwa">return</span> input<span class="hl opt">:</span><span class="hl kwd">sub</span><span class="hl opt">(</span>oldpos<span class="hl opt">, -</span><span class="hl num">1</span><span class="hl opt">)</span>
+    <span class="hl kwa">else</span>
+      position <span class="hl opt">=</span> next_pos
+      <span class="hl slc">-- We only skip the semicolon if it was not at the end of the input</span>
+      <span class="hl slc">-- string.</span>
+      <span class="hl kwa">if</span> next_pos <span class="hl opt">&lt;</span> input<span class="hl opt">:</span><span class="hl kwd">len</span><span class="hl opt">()</span> <span class="hl kwa">then</span>
+	position <span class="hl opt">=</span> next_pos <span class="hl opt">+</span> <span class="hl num">1</span>
+      <span class="hl kwa">end</span>
+      <span class="hl kwa">return</span> input<span class="hl opt">:</span><span class="hl kwd">sub</span><span class="hl opt">(</span>oldpos<span class="hl opt">,</span> next_pos <span class="hl opt">-</span> <span class="hl num">1</span><span class="hl opt">)</span>
+    <span class="hl kwa">end</span>
+  <span class="hl kwa">end</span>
+
+  <span class="hl kwa">return</span> <span class="hl kwb">next</span><span class="hl opt">,</span> input_string<span class="hl opt">,</span> <span class="hl kwa">nil</span>
+<span class="hl kwa">end</span>
+
+<span class="hl kwa">local</span> state <span class="hl opt">= {</span>
+  <span class="hl slc">-- The line and column where the currently described state starts</span>
+  line <span class="hl opt">=</span> <span class="hl num">1</span><span class="hl opt">,</span>
+  column <span class="hl opt">=</span> <span class="hl num">1</span><span class="hl opt">,</span>
+<span class="hl opt">}</span>
+
+<span class="hl kwa">function</span> state<span class="hl opt">.</span><span class="hl kwd">clear</span><span class="hl opt">(</span>self<span class="hl opt">)</span>
+  self<span class="hl opt">.</span>foreground <span class="hl opt">=</span> <span class="hl str">&quot;&quot;</span>
+  self<span class="hl opt">.</span>background <span class="hl opt">=</span> <span class="hl str">&quot;&quot;</span>
+  self<span class="hl opt">.</span>ctermfg <span class="hl opt">=</span> <span class="hl str">&quot;&quot;</span>
+  self<span class="hl opt">.</span>ctermbg <span class="hl opt">=</span> <span class="hl str">&quot;&quot;</span>
+  <span class="hl kwa">for</span> _<span class="hl opt">,</span> k <span class="hl kwa">in</span> <span class="hl kwd">pairs</span><span class="hl opt">(</span>attributes<span class="hl opt">)</span> <span class="hl kwa">do</span> self<span class="hl opt">[</span>k<span class="hl opt">] =</span> <span class="hl kwa">false end</span>
+<span class="hl kwa">end</span>
+
+<span class="hl kwa">function</span> state<span class="hl opt">.</span><span class="hl kwd">state2highlight_group_name</span><span class="hl opt">(</span>self<span class="hl opt">)</span>
+  <span class="hl kwa">if</span> self<span class="hl opt">.</span>conceal <span class="hl kwa">then return</span> <span class="hl str">&quot;NvimPagerConceal&quot;</span> <span class="hl kwa">end</span>
+  <span class="hl kwa">local</span> name <span class="hl opt">=</span> <span class="hl str">&quot;NvimPagerFG_&quot;</span> <span class="hl opt">..</span> self<span class="hl opt">.</span>foreground<span class="hl opt">:</span><span class="hl kwb">gsub</span><span class="hl opt">(</span><span class="hl str">&quot;#&quot;</span><span class="hl opt">,</span> <span class="hl str">&quot;&quot;</span><span class="hl opt">) ..</span>
+	       <span class="hl str">&quot;_BG_&quot;</span> <span class="hl opt">..</span> self<span class="hl opt">.</span>background<span class="hl opt">:</span><span class="hl kwb">gsub</span><span class="hl opt">(</span><span class="hl str">&quot;#&quot;</span><span class="hl opt">,</span> <span class="hl str">&quot;&quot;</span><span class="hl opt">)</span>
+  <span class="hl kwa">for</span> _<span class="hl opt">,</span> field <span class="hl kwa">in</span> <span class="hl kwd">pairs</span><span class="hl opt">(</span>attributes<span class="hl opt">)</span> <span class="hl kwa">do</span>
+    <span class="hl kwa">if</span> self<span class="hl opt">[</span>field<span class="hl opt">]</span> <span class="hl kwa">then</span>
+      name <span class="hl opt">=</span> name <span class="hl opt">..</span> <span class="hl str">&quot;_&quot;</span> <span class="hl opt">..</span> field
+    <span class="hl kwa">end</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">return</span> name
+<span class="hl kwa">end</span>
+
+<span class="hl kwa">function</span> state<span class="hl opt">.</span><span class="hl kwd">parse</span><span class="hl opt">(</span>self<span class="hl opt">,</span> <span class="hl kwb">string</span><span class="hl opt">)</span>
+  <span class="hl kwa">for</span> token<span class="hl opt">,</span> c1<span class="hl opt">,</span> c2<span class="hl opt">,</span> c3 <span class="hl kwa">in</span> <span class="hl kwd">tokenize</span><span class="hl opt">(</span><span class="hl kwb">string</span><span class="hl opt">)</span> <span class="hl kwa">do</span>
+    <span class="hl slc">-- First we check for 256 colors and 24 bit color sequences.</span>
+    <span class="hl kwa">if</span> c3 <span class="hl opt">~=</span> <span class="hl kwa">nil then</span>
+	self<span class="hl opt">[</span>token<span class="hl opt">] =</span> <span class="hl kwd">hexformat_rgb_numbers</span><span class="hl opt">(</span><span class="hl kwb">tonumber</span><span class="hl opt">(</span>c1<span class="hl opt">),</span> <span class="hl kwb">tonumber</span><span class="hl opt">(</span>c2<span class="hl opt">),</span>
+					    <span class="hl kwb">tonumber</span><span class="hl opt">(</span>c3<span class="hl opt">))</span>
+    <span class="hl kwa">elseif</span> c1 <span class="hl opt">~=</span> <span class="hl kwa">nil then</span>
+      self<span class="hl opt">:</span><span class="hl kwd">parse8bit</span><span class="hl opt">(</span>token<span class="hl opt">,</span> c1<span class="hl opt">)</span>
+      self<span class="hl opt">[</span><span class="hl str">&quot;cterm&quot;</span><span class="hl opt">..</span>token<span class="hl opt">:</span><span class="hl kwd">sub</span><span class="hl opt">(</span><span class="hl num">1</span><span class="hl opt">,</span> <span class="hl num">1</span><span class="hl opt">)..</span><span class="hl str">&quot;g&quot;</span><span class="hl opt">] =</span> <span class="hl kwb">tonumber</span><span class="hl opt">(</span>c1<span class="hl opt">)</span>
+    <span class="hl kwa">else</span>
+      <span class="hl kwa">if</span> token <span class="hl opt">==</span> <span class="hl str">&quot;&quot;</span> <span class="hl kwa">then</span> token <span class="hl opt">=</span> <span class="hl num">0</span> <span class="hl kwa">else</span> token <span class="hl opt">=</span> <span class="hl kwb">tonumber</span><span class="hl opt">(</span>token<span class="hl opt">)</span> <span class="hl kwa">end</span>
+      <span class="hl kwa">if</span> token <span class="hl opt">==</span> <span class="hl num">0</span> <span class="hl kwa">then</span>
+	self<span class="hl opt">:</span><span class="hl kwd">clear</span><span class="hl opt">()</span>
+      <span class="hl kwa">elseif</span> token <span class="hl opt">==</span> <span class="hl num">1</span> <span class="hl kwa">or</span> token <span class="hl opt">==</span> <span class="hl num">3</span> <span class="hl kwa">or</span> token <span class="hl opt">==</span> <span class="hl num">4</span> <span class="hl kwa">or</span> token <span class="hl opt">==</span> <span class="hl num">7</span>
+	  <span class="hl kwa">or</span> token <span class="hl opt">==</span> <span class="hl num">8</span> <span class="hl kwa">or</span> token <span class="hl opt">==</span> <span class="hl num">9</span> <span class="hl kwa">then</span>
+	<span class="hl slc">-- 2, 5 and 6 could be handled here if they were supported.</span>
+	self<span class="hl opt">[</span>attributes<span class="hl opt">[</span>token]] <span class="hl opt">=</span> <span class="hl kwa">true</span>
+      <span class="hl kwa">elseif</span> token <span class="hl opt">==</span> <span class="hl num">21</span> <span class="hl kwa">then</span>
+	<span class="hl slc">-- 22 means &quot;doubley underline&quot; or &quot;bold off&quot;, we could implement</span>
+	<span class="hl slc">-- doubley underline by undercurl.</span>
+	<span class="hl slc">--self.undercurl = true</span>
+      <span class="hl kwa">elseif</span> token <span class="hl opt">==</span> <span class="hl num">22</span> <span class="hl kwa">then</span>
+	self<span class="hl opt">.</span>bold <span class="hl opt">=</span> <span class="hl kwa">false</span>
+	<span class="hl slc">--self.faint = false</span>
+      <span class="hl kwa">elseif</span> token <span class="hl opt">==</span> <span class="hl num">23</span> <span class="hl kwa">or</span> token <span class="hl opt">==</span> <span class="hl num">24</span> <span class="hl kwa">or</span> token <span class="hl opt">==</span> <span class="hl num">27</span> <span class="hl kwa">or</span> token <span class="hl opt">==</span> <span class="hl num">28</span>
+	  <span class="hl kwa">or</span> token <span class="hl opt">==</span> <span class="hl num">29</span> <span class="hl kwa">then</span>
+	<span class="hl slc">-- 25 means blink off so it could also be handled here if it was</span>
+	<span class="hl slc">-- supported.</span>
+	self<span class="hl opt">[</span>attributes<span class="hl opt">[</span>token <span class="hl opt">-</span> <span class="hl num">20</span>]] <span class="hl opt">=</span> <span class="hl kwa">false</span>
+      <span class="hl kwa">elseif</span> token <span class="hl opt">&gt;=</span> <span class="hl num">30</span> <span class="hl kwa">and</span> token <span class="hl opt">&lt;=</span> <span class="hl num">37</span> <span class="hl kwa">then</span> <span class="hl slc">-- foreground color</span>
+	self<span class="hl opt">.</span>foreground <span class="hl opt">=</span> colors<span class="hl opt">[</span>token <span class="hl opt">-</span> <span class="hl num">30</span><span class="hl opt">]</span>
+	self<span class="hl opt">.</span>ctermfg <span class="hl opt">=</span> token <span class="hl opt">-</span> <span class="hl num">30</span>
+      <span class="hl kwa">elseif</span> token <span class="hl opt">==</span> <span class="hl num">39</span> <span class="hl kwa">then</span> <span class="hl slc">-- reset foreground</span>
+	self<span class="hl opt">.</span>foreground <span class="hl opt">=</span> <span class="hl str">&quot;&quot;</span>
+	self<span class="hl opt">.</span>ctermfg <span class="hl opt">=</span> <span class="hl str">&quot;&quot;</span>
+      <span class="hl kwa">elseif</span> token <span class="hl opt">&gt;=</span> <span class="hl num">40</span> <span class="hl kwa">and</span> token <span class="hl opt">&lt;=</span> <span class="hl num">47</span> <span class="hl kwa">then</span> <span class="hl slc">-- background color</span>
+	self<span class="hl opt">.</span>background <span class="hl opt">=</span> colors<span class="hl opt">[</span>token <span class="hl opt">-</span> <span class="hl num">40</span><span class="hl opt">]</span>
+	self<span class="hl opt">.</span>ctermbg <span class="hl opt">=</span> token <span class="hl opt">-</span> <span class="hl num">40</span>
+      <span class="hl kwa">elseif</span> token <span class="hl opt">==</span> <span class="hl num">49</span> <span class="hl kwa">then</span> <span class="hl slc">-- reset background</span>
+	self<span class="hl opt">.</span>background <span class="hl opt">=</span> <span class="hl str">&quot;&quot;</span>
+	self<span class="hl opt">.</span>ctermbg <span class="hl opt">=</span> <span class="hl str">&quot;&quot;</span>
+      <span class="hl kwa">elseif</span> token <span class="hl opt">&gt;=</span> <span class="hl num">90</span> <span class="hl kwa">and</span> token <span class="hl opt">&lt;=</span> <span class="hl num">97</span> <span class="hl kwa">then</span> <span class="hl slc">-- bright foreground color</span>
+	self<span class="hl opt">.</span>foreground <span class="hl opt">=</span> colors<span class="hl opt">[</span>token <span class="hl opt">-</span> <span class="hl num">82</span><span class="hl opt">]</span>
+      <span class="hl kwa">elseif</span> token <span class="hl opt">&gt;=</span> <span class="hl num">100</span> <span class="hl kwa">and</span> token <span class="hl opt">&lt;=</span> <span class="hl num">107</span> <span class="hl kwa">then</span> <span class="hl slc">-- bright background color</span>
+	self<span class="hl opt">.</span>background <span class="hl opt">=</span> colors<span class="hl opt">[</span>token <span class="hl opt">-</span> <span class="hl num">92</span><span class="hl opt">]</span>
+      <span class="hl kwa">end</span>
+    <span class="hl kwa">end</span>
+  <span class="hl kwa">end</span>
+<span class="hl kwa">end</span>
+
+<span class="hl kwa">function</span> state<span class="hl opt">.</span><span class="hl kwd">parse8bit</span><span class="hl opt">(</span>self<span class="hl opt">,</span> fgbg<span class="hl opt">,</span> color<span class="hl opt">)</span>
+  <span class="hl kwa">local</span> colornr <span class="hl opt">=</span> <span class="hl kwb">tonumber</span><span class="hl opt">(</span>color<span class="hl opt">)</span>
+  <span class="hl kwa">if</span> colornr <span class="hl opt">&gt;=</span> <span class="hl num">0</span> <span class="hl kwa">and</span> colornr <span class="hl opt">&lt;=</span> <span class="hl num">7</span> <span class="hl kwa">then</span>
+    color <span class="hl opt">=</span> colors<span class="hl opt">[</span>colornr<span class="hl opt">]</span>
+  <span class="hl kwa">elseif</span> colornr <span class="hl opt">&gt;=</span> <span class="hl num">8</span> <span class="hl kwa">and</span> colornr <span class="hl opt">&lt;=</span> <span class="hl num">15</span> <span class="hl kwa">then</span> <span class="hl slc">-- high pallet colors</span>
+    color <span class="hl opt">=</span> colors<span class="hl opt">[</span>colornr<span class="hl opt">]</span> <span class="hl slc">-- + 82 + 10 * (fgbg == &quot;background&quot; and 1 or 0)</span>
+  <span class="hl kwa">elseif</span> colornr <span class="hl opt">&gt;=</span> <span class="hl num">16</span> <span class="hl kwa">and</span> colornr <span class="hl opt">&lt;=</span> <span class="hl num">231</span> <span class="hl kwa">then</span> <span class="hl slc">-- color cube</span>
+    color <span class="hl opt">=</span> <span class="hl kwd">hexformat_rgb_numbers</span><span class="hl opt">(</span><span class="hl kwd">split_predifined_terminal_color</span><span class="hl opt">(</span>colornr<span class="hl opt">-</span><span class="hl num">16</span><span class="hl opt">))</span>
+  <span class="hl kwa">else</span> <span class="hl slc">-- grayscale ramp</span>
+    colornr <span class="hl opt">=</span> <span class="hl num">8</span> <span class="hl opt">+</span> <span class="hl num">10</span> <span class="hl opt">* (</span>colornr <span class="hl opt">-</span> <span class="hl num">232</span><span class="hl opt">)</span>
+    color <span class="hl opt">=</span> <span class="hl kwd">hexformat_rgb_numbers</span><span class="hl opt">(</span>colornr<span class="hl opt">,</span> colornr<span class="hl opt">,</span> colornr<span class="hl opt">)</span>
+  <span class="hl kwa">end</span>
+  self<span class="hl opt">[</span>fgbg<span class="hl opt">] =</span> <span class="hl str">&quot;&quot;</span><span class="hl opt">..</span>color
+<span class="hl kwa">end</span>
+
+<span class="hl kwa">function</span> state<span class="hl opt">.</span><span class="hl kwd">compute_highlight_command</span><span class="hl opt">(</span>self<span class="hl opt">,</span> groupname<span class="hl opt">)</span>
+  <span class="hl kwa">local</span> args <span class="hl opt">=</span> <span class="hl str">&quot;&quot;</span>
+  <span class="hl kwa">if</span> self<span class="hl opt">.</span>foreground <span class="hl opt">~=</span> <span class="hl str">&quot;&quot;</span> <span class="hl kwa">then</span>
+    args <span class="hl opt">=</span> args<span class="hl opt">..</span><span class="hl str">&quot; guifg=&quot;</span><span class="hl opt">..</span>self<span class="hl opt">.</span>foreground
+    <span class="hl kwa">if</span> self<span class="hl opt">.</span>ctermfg <span class="hl opt">~=</span> <span class="hl str">&quot;&quot;</span> <span class="hl kwa">then</span>
+      args <span class="hl opt">=</span> args <span class="hl opt">..</span> <span class="hl str">&quot; ctermfg=&quot;</span> <span class="hl opt">..</span> self<span class="hl opt">.</span>ctermfg
+    <span class="hl kwa">end</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">if</span> self<span class="hl opt">.</span>background <span class="hl opt">~=</span> <span class="hl str">&quot;&quot;</span> <span class="hl kwa">then</span>
+    args <span class="hl opt">=</span> args<span class="hl opt">..</span><span class="hl str">&quot; guibg=&quot;</span><span class="hl opt">..</span>self<span class="hl opt">.</span>background
+    <span class="hl kwa">if</span> self<span class="hl opt">.</span>ctermbg <span class="hl opt">~=</span> <span class="hl str">&quot;&quot;</span> <span class="hl kwa">then</span>
+      args <span class="hl opt">=</span> args <span class="hl opt">..</span> <span class="hl str">&quot; ctermbg=&quot;</span> <span class="hl opt">..</span> self<span class="hl opt">.</span>ctermbg
+    <span class="hl kwa">end</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">local</span> attrs <span class="hl opt">=</span> <span class="hl str">&quot;&quot;</span>
+  <span class="hl kwa">for</span> _<span class="hl opt">,</span> key <span class="hl kwa">in</span> <span class="hl kwd">pairs</span><span class="hl opt">(</span>attributes<span class="hl opt">)</span> <span class="hl kwa">do</span>
+    <span class="hl kwa">if</span> self<span class="hl opt">[</span>key<span class="hl opt">]</span> <span class="hl kwa">then</span>
+      attrs <span class="hl opt">=</span> attrs <span class="hl opt">..</span> <span class="hl str">&quot;,&quot;</span> <span class="hl opt">..</span> key
+    <span class="hl kwa">end</span>
+  <span class="hl kwa">end</span>
+  attrs <span class="hl opt">=</span> attrs<span class="hl opt">:</span><span class="hl kwd">sub</span><span class="hl opt">(</span><span class="hl num">2</span><span class="hl opt">)</span>
+  <span class="hl kwa">if</span> attrs <span class="hl opt">~=</span> <span class="hl str">&quot;&quot;</span> <span class="hl kwa">then</span>
+    args <span class="hl opt">=</span> args <span class="hl opt">..</span> <span class="hl str">&quot; gui=&quot;</span> <span class="hl opt">..</span> attrs <span class="hl opt">..</span> <span class="hl str">&quot; cterm=&quot;</span> <span class="hl opt">..</span> attrs
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">if</span> args <span class="hl opt">==</span> <span class="hl str">&quot;&quot;</span> <span class="hl kwa">then</span>
+    <span class="hl kwa">return</span> <span class="hl str">&quot;highlight default link &quot;</span> <span class="hl opt">..</span> groupname <span class="hl opt">..</span> <span class="hl str">&quot; Normal&quot;</span>
+  <span class="hl kwa">else</span>
+    <span class="hl kwa">return</span> <span class="hl str">&quot;highlight default &quot;</span> <span class="hl opt">..</span> groupname <span class="hl opt">..</span> args
+  <span class="hl kwa">end</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Wrapper around nvim_buf_add_highlight to fix index offsets</span>
+<span class="hl slc">--</span>
+<span class="hl slc">-- The function nvim_buf_add_highlight expects 0 based line numbers and column</span>
+<span class="hl slc">-- numbers.  Set the start column to 0, the end column to -1 if not given.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">add_highlight</span><span class="hl opt">(</span>groupname<span class="hl opt">,</span> line<span class="hl opt">,</span> from<span class="hl opt">,</span> to<span class="hl opt">)</span>
+  <span class="hl kwa">local</span> line_0 <span class="hl opt">=</span> line <span class="hl opt">-</span> <span class="hl num">1</span>
+  <span class="hl kwa">local</span> from_0 <span class="hl opt">= (</span>from <span class="hl kwa">or</span> <span class="hl num">1</span><span class="hl opt">) -</span> <span class="hl num">1</span>
+  <span class="hl kwa">local</span> to_0 <span class="hl opt">= (</span>to <span class="hl kwa">or</span> <span class="hl num">0</span><span class="hl opt">) -</span> <span class="hl num">1</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_add_highlight</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> namespace<span class="hl opt">,</span> groupname<span class="hl opt">,</span> line_0<span class="hl opt">,</span> from_0<span class="hl opt">,</span> to_0<span class="hl opt">)</span>
+<span class="hl kwa">end</span>
+
+<span class="hl kwa">function</span> state<span class="hl opt">.</span><span class="hl kwd">render</span><span class="hl opt">(</span>self<span class="hl opt">,</span> from_line<span class="hl opt">,</span> from_column<span class="hl opt">,</span> to_line<span class="hl opt">,</span> to_column<span class="hl opt">)</span>
+  <span class="hl kwa">if</span> from_line <span class="hl opt">==</span> to_line <span class="hl kwa">and</span> from_column <span class="hl opt">==</span> to_column <span class="hl kwa">then</span>
+    <span class="hl kwa">return</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwa">local</span> groupname <span class="hl opt">=</span> self<span class="hl opt">:</span><span class="hl kwd">state2highlight_group_name</span><span class="hl opt">()</span>
+  <span class="hl slc">-- check if the hl group already exists</span>
+  <span class="hl kwa">if</span> cache<span class="hl opt">[</span>groupname<span class="hl opt">] ==</span> <span class="hl kwa">nil then</span>
+    nvim<span class="hl opt">.</span><span class="hl kwd">nvim_command</span><span class="hl opt">(</span>self<span class="hl opt">:</span><span class="hl kwd">compute_highlight_command</span><span class="hl opt">(</span>groupname<span class="hl opt">))</span>
+    cache<span class="hl opt">[</span>groupname<span class="hl opt">] =</span> <span class="hl kwa">true</span>
+  <span class="hl kwa">end</span>
+
+  <span class="hl kwa">if</span> from_line <span class="hl opt">==</span> to_line <span class="hl kwa">then</span>
+    <span class="hl kwd">add_highlight</span><span class="hl opt">(</span>groupname<span class="hl opt">,</span> from_line<span class="hl opt">,</span> from_column<span class="hl opt">,</span> to_column<span class="hl opt">)</span>
+  <span class="hl kwa">else</span>
+    <span class="hl kwd">add_highlight</span><span class="hl opt">(</span>groupname<span class="hl opt">,</span> from_line<span class="hl opt">,</span> from_column<span class="hl opt">)</span>
+    <span class="hl kwa">for</span> line <span class="hl opt">=</span> from_line<span class="hl opt">+</span><span class="hl num">1</span><span class="hl opt">,</span> to_line<span class="hl opt">-</span><span class="hl num">1</span> <span class="hl kwa">do</span>
+      <span class="hl kwd">add_highlight</span><span class="hl opt">(</span>groupname<span class="hl opt">,</span> line<span class="hl opt">)</span>
+    <span class="hl kwa">end</span>
+    <span class="hl kwd">add_highlight</span><span class="hl opt">(</span>groupname<span class="hl opt">,</span> to_line<span class="hl opt">,</span> <span class="hl num">1</span><span class="hl opt">,</span> to_column<span class="hl opt">)</span>
+  <span class="hl kwa">end</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Parse the current buffer for ansi escape sequences and add buffer</span>
+<span class="hl slc">-- highlights to the buffer instead.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">ansi2highlight</span><span class="hl opt">()</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_command</span><span class="hl opt">(</span>
+    <span class="hl str">&quot;syntax match NvimPagerEscapeSequence conceal &apos;</span><span class="hl esc">\\</span><span class="hl str">e</span><span class="hl esc">\\</span><span class="hl str">[[0-9;]*m&apos;&quot;</span><span class="hl opt">)</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_command</span><span class="hl opt">(</span><span class="hl str">&quot;highlight NvimPagerConceal gui=NONE guisp=NONE &quot;</span> <span class="hl opt">..</span>
+		    <span class="hl str">&quot;guifg=background guibg=background&quot;</span><span class="hl opt">)</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_win_set_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&quot;conceallevel&quot;</span><span class="hl opt">,</span> <span class="hl num">3</span><span class="hl opt">)</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_win_set_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&quot;concealcursor&quot;</span><span class="hl opt">,</span> <span class="hl str">&quot;nv&quot;</span><span class="hl opt">)</span>
+  <span class="hl kwa">local</span> pattern <span class="hl opt">=</span> <span class="hl str">&quot;\27%[([0-9;]*)m&quot;</span>
+  state<span class="hl opt">:</span><span class="hl kwd">clear</span><span class="hl opt">()</span>
+  namespace <span class="hl opt">=</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_create_namespace</span><span class="hl opt">(</span><span class="hl str">&quot;&quot;</span><span class="hl opt">)</span>
+  <span class="hl kwa">for</span> lnum<span class="hl opt">,</span> line <span class="hl kwa">in</span> <span class="hl kwd">ipairs</span><span class="hl opt">(</span>nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_get_lines</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl num">0</span><span class="hl opt">, -</span><span class="hl num">1</span><span class="hl opt">,</span> <span class="hl kwa">false</span><span class="hl opt">))</span> <span class="hl kwa">do</span>
+    <span class="hl kwa">local</span> start<span class="hl opt">,</span> end_<span class="hl opt">,</span> spec <span class="hl opt">=</span> <span class="hl kwa">nil</span><span class="hl opt">,</span> <span class="hl kwa">nil</span><span class="hl opt">,</span> <span class="hl kwa">nil</span>
+    <span class="hl kwa">local</span> col <span class="hl opt">=</span> <span class="hl num">1</span>
+    <span class="hl kwa">repeat</span>
+      start<span class="hl opt">,</span> end_<span class="hl opt">,</span> spec <span class="hl opt">=</span> line<span class="hl opt">:</span><span class="hl kwd">find</span><span class="hl opt">(</span>pattern<span class="hl opt">,</span> col<span class="hl opt">)</span>
+      <span class="hl kwa">if</span> start <span class="hl opt">~=</span> <span class="hl kwa">nil then</span>
+	state<span class="hl opt">:</span><span class="hl kwd">render</span><span class="hl opt">(</span>state<span class="hl opt">.</span>line<span class="hl opt">,</span> state<span class="hl opt">.</span>column<span class="hl opt">,</span> lnum<span class="hl opt">,</span> start<span class="hl opt">)</span>
+	state<span class="hl opt">.</span>line <span class="hl opt">=</span> lnum
+	state<span class="hl opt">.</span>column <span class="hl opt">=</span> end_
+	state<span class="hl opt">:</span><span class="hl kwd">parse</span><span class="hl opt">(</span>spec<span class="hl opt">)</span>
+	<span class="hl slc">-- update the position to find the next match in the line</span>
+	col <span class="hl opt">=</span> end_
+      <span class="hl kwa">end</span>
+    <span class="hl kwa">until</span> start <span class="hl opt">==</span> <span class="hl kwa">nil</span>
+  <span class="hl kwa">end</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Set up mappings to make nvim behave a little more like a pager.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">set_maps</span><span class="hl opt">()</span>
+  <span class="hl kwa">local function</span> <span class="hl kwd">map</span><span class="hl opt">(</span>mode<span class="hl opt">,</span> lhs<span class="hl opt">,</span> rhs<span class="hl opt">)</span>
+    nvim<span class="hl opt">.</span><span class="hl kwd">nvim_set_keymap</span><span class="hl opt">(</span>mode<span class="hl opt">,</span> lhs<span class="hl opt">,</span> rhs<span class="hl opt">, {</span>noremap <span class="hl opt">=</span> <span class="hl kwa">true</span><span class="hl opt">})</span>
+  <span class="hl kwa">end</span>
+  <span class="hl kwd">map</span><span class="hl opt">(</span><span class="hl str">&apos;n&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;q&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;:quitall!&lt;CR&gt;&apos;</span><span class="hl opt">)</span>
+  <span class="hl kwd">map</span><span class="hl opt">(</span><span class="hl str">&apos;v&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;q&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;:&lt;C-U&gt;quitall!&lt;CR&gt;&apos;</span><span class="hl opt">)</span>
+  <span class="hl kwd">map</span><span class="hl opt">(</span><span class="hl str">&apos;n&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;&lt;Space&gt;&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;&lt;PageDown&gt;&apos;</span><span class="hl opt">)</span>
+  <span class="hl kwd">map</span><span class="hl opt">(</span><span class="hl str">&apos;n&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;&lt;S-Space&gt;&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;&lt;PageUp&gt;&apos;</span><span class="hl opt">)</span>
+  <span class="hl kwd">map</span><span class="hl opt">(</span><span class="hl str">&apos;n&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;g&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;gg&apos;</span><span class="hl opt">)</span>
+  <span class="hl kwd">map</span><span class="hl opt">(</span><span class="hl str">&apos;n&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;&lt;Up&gt;&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;&lt;C-Y&gt;&apos;</span><span class="hl opt">)</span>
+  <span class="hl kwd">map</span><span class="hl opt">(</span><span class="hl str">&apos;n&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;&lt;Down&gt;&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;&lt;C-E&gt;&apos;</span><span class="hl opt">)</span>
+  <span class="hl kwd">map</span><span class="hl opt">(</span><span class="hl str">&apos;n&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;k&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;&lt;C-Y&gt;&apos;</span><span class="hl opt">)</span>
+  <span class="hl kwd">map</span><span class="hl opt">(</span><span class="hl str">&apos;n&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;j&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;&lt;C-E&gt;&apos;</span><span class="hl opt">)</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Setup function for the VimEnter autocmd.</span>
+<span class="hl slc">-- This function will be called for each buffer once</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">pager_mode</span><span class="hl opt">()</span>
+  <span class="hl kwa">if</span> <span class="hl kwd">check_escape_sequences</span><span class="hl opt">()</span> <span class="hl kwa">then</span>
+    <span class="hl slc">-- Try to highlight ansi escape sequences.</span>
+    <span class="hl kwd">ansi2highlight</span><span class="hl opt">()</span>
+    <span class="hl slc">-- Lines with concealed ansi esc sequences seem shorter than they are (by</span>
+    <span class="hl slc">-- character count) so it looks like they wrap to early and the concealing</span>
+    <span class="hl slc">-- of escape sequences only works for the first &amp;synmaxcol chars.</span>
+    nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_set_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&quot;synmaxcol&quot;</span><span class="hl opt">,</span> <span class="hl num">0</span><span class="hl opt">)</span> <span class="hl slc">-- unlimited</span>
+    nvim<span class="hl opt">.</span><span class="hl kwd">nvim_win_set_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&quot;wrap&quot;</span><span class="hl opt">,</span> <span class="hl kwa">false</span><span class="hl opt">)</span>
+  <span class="hl kwa">end</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_set_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&apos;modifiable&apos;</span><span class="hl opt">,</span> <span class="hl kwa">false</span><span class="hl opt">)</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_set_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&apos;modified&apos;</span><span class="hl opt">,</span> <span class="hl kwa">false</span><span class="hl opt">)</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Setup function to be called from --cmd.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">stage1</span><span class="hl opt">()</span>
+  <span class="hl kwd">fix_runtime_path</span><span class="hl opt">()</span>
+  <span class="hl slc">-- Don&apos;t remember file names and positions</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_set_option</span><span class="hl opt">(</span><span class="hl str">&apos;shada&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;&apos;</span><span class="hl opt">)</span>
+  <span class="hl slc">-- prevent messages when opening files (especially for the cat version)</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_set_option</span><span class="hl opt">(</span><span class="hl str">&apos;shortmess&apos;</span><span class="hl opt">,</span> nvim<span class="hl opt">.</span><span class="hl kwd">nvim_get_option</span><span class="hl opt">(</span><span class="hl str">&apos;shortmess&apos;</span><span class="hl opt">)..</span><span class="hl str">&apos;F&apos;</span><span class="hl opt">)</span>
+  <span class="hl slc">-- Define autocmd group for nvimpager.</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_command</span><span class="hl opt">(</span><span class="hl str">&apos;augroup NvimPager&apos;</span><span class="hl opt">)</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_command</span><span class="hl opt">(</span><span class="hl str">&apos;  autocmd!&apos;</span><span class="hl opt">)</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_command</span><span class="hl opt">(</span><span class="hl str">&apos;augroup END&apos;</span><span class="hl opt">)</span>
+  doc <span class="hl opt">=</span> <span class="hl kwd">detect_parent_process</span><span class="hl opt">()</span>
+  <span class="hl kwa">if</span> doc <span class="hl opt">==</span> <span class="hl str">&apos;git&apos;</span> <span class="hl kwa">then</span>
+    <span class="hl slc">-- We disable modelines for this buffer as they could disturb the git</span>
+    <span class="hl slc">-- highlighting in diffs.</span>
+    nvim<span class="hl opt">.</span><span class="hl kwd">nvim_buf_set_option</span><span class="hl opt">(</span><span class="hl num">0</span><span class="hl opt">,</span> <span class="hl str">&apos;modeline&apos;</span><span class="hl opt">,</span> <span class="hl kwa">false</span><span class="hl opt">)</span>
+    nvim<span class="hl opt">.</span><span class="hl kwd">nvim_set_option</span><span class="hl opt">(</span><span class="hl str">&apos;modelines&apos;</span><span class="hl opt">,</span> <span class="hl num">0</span><span class="hl opt">)</span>
+  <span class="hl kwa">end</span>
+  <span class="hl slc">-- Theoretically these options only affect the pager mode so they could also</span>
+  <span class="hl slc">-- be set in stage2() but that would overwrite user settings from the init</span>
+  <span class="hl slc">-- file.</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_set_option</span><span class="hl opt">(</span><span class="hl str">&apos;mouse&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;a&apos;</span><span class="hl opt">)</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_set_option</span><span class="hl opt">(</span><span class="hl str">&apos;laststatus&apos;</span><span class="hl opt">,</span> <span class="hl num">0</span><span class="hl opt">)</span>
+<span class="hl kwa">end</span>
+
+<span class="hl slc">-- Set up autocomands to start the correct mode after startup or for each</span>
+<span class="hl slc">-- file.  This function assumes that in &quot;cat mode&quot; we are called with</span>
+<span class="hl slc">-- --headless and hence do not have a user interface.  This also means that</span>
+<span class="hl slc">-- this function can only be called with -c or later as the user interface</span>
+<span class="hl slc">-- would not be available in --cmd.</span>
+<span class="hl kwa">local function</span> <span class="hl kwd">stage2</span><span class="hl opt">()</span>
+  <span class="hl kwd">detect_filetype</span><span class="hl opt">()</span>
+  <span class="hl kwa">local</span> mode<span class="hl opt">,</span> events
+  <span class="hl kwa">if</span> <span class="hl opt">#</span>nvim<span class="hl opt">.</span><span class="hl kwd">nvim_list_uis</span><span class="hl opt">() ==</span> <span class="hl num">0</span> <span class="hl kwa">then</span>
+    mode<span class="hl opt">,</span> events <span class="hl opt">=</span> <span class="hl str">&apos;cat&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;VimEnter&apos;</span>
+  <span class="hl kwa">else</span>
+    <span class="hl kwa">if</span> nvimpager<span class="hl opt">.</span>maps <span class="hl kwa">then</span>
+      <span class="hl kwd">set_maps</span><span class="hl opt">()</span>
+    <span class="hl kwa">end</span>
+    mode<span class="hl opt">,</span> events <span class="hl opt">=</span> <span class="hl str">&apos;pager&apos;</span><span class="hl opt">,</span> <span class="hl str">&apos;VimEnter,BufWinEnter&apos;</span>
+  <span class="hl kwa">end</span>
+  <span class="hl slc">-- The &quot;nested&quot; in these autocomands enables nested executions of</span>
+  <span class="hl slc">-- autocomands inside the *_mode() functions.  See :h autocmd-nested, for</span>
+  <span class="hl slc">-- compatibility with nvim &lt; 0.4 we use &quot;nested&quot; and not &quot;++nested&quot;.</span>
+  nvim<span class="hl opt">.</span><span class="hl kwd">nvim_command</span><span class="hl opt">(</span>
+    <span class="hl str">&apos;autocmd NvimPager &apos;</span><span class="hl opt">..</span>events<span class="hl opt">..</span><span class="hl str">&apos; * nested lua nvimpager.&apos;</span><span class="hl opt">..</span>mode<span class="hl opt">..</span><span class="hl str">&apos;_mode()&apos;</span><span class="hl opt">)</span>
+<span class="hl kwa">end</span>
+
+<span class="hl kwa">local</span> nvimpager <span class="hl opt">= {</span>
+  <span class="hl slc">-- user facing options</span>
+  maps <span class="hl opt">=</span> <span class="hl kwa">true</span><span class="hl opt">,</span>  <span class="hl slc">-- if the default mappings should be defined</span>
+  <span class="hl slc">-- exported functions</span>
+  cat_mode <span class="hl opt">=</span> cat_mode<span class="hl opt">,</span>
+  pager_mode <span class="hl opt">=</span> pager_mode<span class="hl opt">,</span>
+  stage1 <span class="hl opt">=</span> stage1<span class="hl opt">,</span>
+  stage2 <span class="hl opt">=</span> stage2<span class="hl opt">,</span>
+  <span class="hl slc">-- functions only exported for tests</span>
+  _testable <span class="hl opt">= {</span>
+    color2escape_24bit <span class="hl opt">=</span> color2escape_24bit<span class="hl opt">,</span>
+    color2escape_8bit <span class="hl opt">=</span> color2escape_8bit<span class="hl opt">,</span>
+    detect_parent_process <span class="hl opt">=</span> detect_parent_process<span class="hl opt">,</span>
+    group2ansi <span class="hl opt">=</span> group2ansi<span class="hl opt">,</span>
+    hexformat_rgb_numbers <span class="hl opt">=</span> hexformat_rgb_numbers<span class="hl opt">,</span>
+    init_cat_mode <span class="hl opt">=</span> init_cat_mode<span class="hl opt">,</span>
+    replace_prefix <span class="hl opt">=</span> replace_prefix<span class="hl opt">,</span>
+    split_predifined_terminal_color <span class="hl opt">=</span> split_predifined_terminal_color<span class="hl opt">,</span>
+    split_rgb_number <span class="hl opt">=</span> split_rgb_number<span class="hl opt">,</span>
+    state <span class="hl opt">=</span> state<span class="hl opt">,</span>
+    tokenize <span class="hl opt">=</span> tokenize<span class="hl opt">,</span>
+  <span class="hl opt">}</span>
+<span class="hl opt">}</span>
+
+<span class="hl kwa">return</span> nvimpager
+</pre>
+</body>
+</html>
+<!--HTML generated by highlight 3.41, http://www.andre-simon.de/-->

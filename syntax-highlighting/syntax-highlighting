@@ -1,0 +1,91 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'yaml'
+
+require 'css_parser'
+require 'nokogiri'
+
+class Code
+  include CssParser
+
+  HIGHLIGHT_CLASS = '.hl'
+
+  Item = Struct.new :type, :content, :color, keyword_init: true
+
+  attr_reader :colors_by_type
+
+  def initialize(css_content)
+    @colors_by_type = parse_css_colors_by_type(css_content)
+  end
+
+  def parse(html_content)
+    parse_html_contents_by_type(html_content).map do |type, content|
+      Item.new type: type, content: content, color: colors_by_type[type]
+    end
+  end
+
+  def parse_from_html_file(html_file)
+    parse(File.read(html_file))
+  end
+
+  private
+
+  def parse_html_contents_by_type(html_content)
+    doc = Nokogiri::HTML(html_content)
+    codes = doc.css(HIGHLIGHT_CLASS)
+
+    contents_by_type = {}
+
+    codes.each do |code|
+      type = code.to_h['class'].split.last
+      next if type == 'hl'
+
+      (contents_by_type[type] ||= []) << code.content
+    end
+
+    contents_by_type
+  end
+
+  def parse_css_colors_by_type(css_content)
+    parser = CssParser::Parser.new
+    parser.load_string!(css_content)
+
+    colors_by_type = {}
+
+    parser.each_selector do |sel, decs, spec|
+      next unless sel.start_with?("#{HIGHLIGHT_CLASS}.")
+
+      type = sel.delete_prefix("#{HIGHLIGHT_CLASS}.")
+      color = expand_declarations(decs)['color']
+
+      colors_by_type[type] = color
+    end
+
+    colors_by_type
+  end
+
+  def expand_declarations(declarations)
+    ruleset = RuleSet.new(nil, declarations)
+    ruleset.expand_shorthand!
+
+    collected = {}
+    ruleset.each_declaration do |prop, val, _imp|
+      collected[prop.to_s] = val.to_s
+    end
+    collected
+  end
+
+  class << self
+    def from_css_file(css_file)
+      new File.read(css_file)
+    end
+  end
+end
+
+def main
+  items = Code.from_css_file(ARGV.shift).parse_from_html_file(ARGV.shift)
+  puts items.map { |item| item.to_h.transform_keys(&:to_s) }.to_yaml
+end
+
+main
